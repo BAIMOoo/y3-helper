@@ -291,6 +291,36 @@ export class 功能 extends TreeNode {
                 多开模式(),
                 启用Tracy(),
                 切换自定义视图(),
+                new TreeNode('MCP Server', {
+                    iconPath: new vscode.ThemeIcon('plug'),
+                    tooltip: l10n.t('MCP Server 用于 Claude Code 连接'),
+                    childs: [
+                        new TreeNode(l10n.t('启动 MCP Server'), {
+                            iconPath: new vscode.ThemeIcon('play'),
+                            command: {
+                                command: 'y3-helper.startMCPServer',
+                                title: l10n.t('启动 MCP Server'),
+                            },
+                            tooltip: l10n.t('启动 MCP Server，允许 Claude Code 连接'),
+                        }),
+                        new TreeNode(l10n.t('停止 MCP Server'), {
+                            iconPath: new vscode.ThemeIcon('debug-stop'),
+                            command: {
+                                command: 'y3-helper.stopMCPServer',
+                                title: l10n.t('停止 MCP Server'),
+                            },
+                            tooltip: l10n.t('停止 MCP Server'),
+                        }),
+                        new TreeNode(l10n.t('查看服务器地址'), {
+                            iconPath: new vscode.ThemeIcon('location'),
+                            command: {
+                                command: 'y3-helper.showMCPSocketPath',
+                                title: l10n.t('查看服务器地址'),
+                            },
+                            tooltip: l10n.t('显示 MCP Server TCP 地址'),
+                        }),
+                    ],
+                }),
             ]
         });
 

@@ -25,9 +25,11 @@ import * as globalScript from './globalScript';
 import * as luaLanguage from './luaLanguage';
 import * as ecaCompiler from './ecaCompiler';
 import * as l10n from '@vscode/l10n';
+import * as mcp from './mcp';
 
 class Helper {
     private context: vscode.ExtensionContext;
+    private tcpServer?: mcp.TCPServer;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
@@ -262,6 +264,59 @@ class Helper {
         });
     }
 
+    private async startTCPServer() {
+        try {
+            this.tcpServer = new mcp.TCPServer();
+            await this.tcpServer.start();
+            tools.log.info('[Y3-Helper] TCP Server started for MCP');
+        } catch (error) {
+            tools.log.error('[Y3-Helper] Failed to start TCP Server:', error);
+            vscode.window.showErrorMessage(l10n.t('启动 MCP TCP 服务器失败'));
+        }
+    }
+
+    private stopTCPServer() {
+        if (this.tcpServer) {
+            this.tcpServer.dispose();
+            this.tcpServer = undefined;
+            tools.log.info('[Y3-Helper] TCP Server stopped');
+        }
+    }
+
+    private registerCommandOfMCP() {
+        vscode.commands.registerCommand('y3-helper.startMCPServer', async () => {
+            if (this.tcpServer) {
+                vscode.window.showInformationMessage(l10n.t('MCP Server 已经在运行'));
+                return;
+            }
+            await this.startTCPServer();
+            vscode.window.showInformationMessage(l10n.t('MCP Server 已启动'));
+        });
+
+        vscode.commands.registerCommand('y3-helper.stopMCPServer', () => {
+            if (!this.tcpServer) {
+                vscode.window.showInformationMessage(l10n.t('MCP Server 未运行'));
+                return;
+            }
+            this.stopTCPServer();
+            vscode.window.showInformationMessage(l10n.t('MCP Server 已停止'));
+        });
+
+        vscode.commands.registerCommand('y3-helper.showMCPSocketPath', () => {
+            const config = mcp.getTCPConfig();
+            const address = `${config.host}:${config.port}`;
+            vscode.window.showInformationMessage(
+                `MCP Server ${l10n.t('地址')}: ${address}`,
+                l10n.t('复制地址')
+            ).then(selection => {
+                if (selection === l10n.t('复制地址')) {
+                    vscode.env.clipboard.writeText(address);
+                    vscode.window.showInformationMessage(l10n.t('已复制到剪贴板'));
+                }
+            });
+        });
+    }
+
     private checkNewProject() {
         let newProjectPath = this.context.globalState.get("NewProjectPath");
         if (!newProjectPath) {
@@ -292,7 +347,8 @@ class Helper {
         this.registerCommandOfLaunchGame();
         this.registerCommandOfAttach();
         this.registerCommandOfLaunchEditor();
-        
+        this.registerCommandOfMCP();
+
         this.reloadEnvWhenConfigChange();
 
         this.registerCommandOfNetworkServer();

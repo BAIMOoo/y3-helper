@@ -444,15 +444,18 @@
     ],
     "icon": "image/logo.png",
     "scripts": {
-        "vscode:prepublish": "webpack --mode production",
+        "vscode:prepublish": "webpack --mode production && webpack --config webpack.mcp.config.js",
         "compile": "webpack --mode none",
+        "compile:mcp": "webpack --config webpack.mcp.config.js",
         "watch": "webpack --mode none --watch",
+        "watch:mcp": "webpack --config webpack.mcp.config.js --watch",
         "pretest": "npm run compile && npm run lint",
         "lint": "eslint src --ext ts",
         "test": "node ./out/test/runTest.js",
         "feasibility_test": "node ./out/test/feasibility.test.js"
     },
     "dependencies": {
+        "@modelcontextprotocol/sdk": "^0.5.0",
         "@vscode/l10n": "^0.0.18",
         "exceljs": "^4.4.0",
         "fast-xml-parser": "^4.3.5",
