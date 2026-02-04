@@ -69,26 +69,42 @@ Y3-Helper MCP Server 是一个基于 Model Context Protocol (MCP) 的服务，�
 
 #### 步骤 2：配置 Claude Code（用户侧）
 
-在终端中运行以下命令（**使用你的实际扩展安装路径**）：
+扩展安装后，`mcp-server.js` 文件位于 VSCode 扩展目录中。
+
+**查找扩展安装路径：**
+
+1. 在 VSCode 中按 `Ctrl+Shift+P`（macOS: `Cmd+Shift+P`）
+2. 输入 "Developer: Open Extensions Folder"
+3. 找到 `sumneko.y3-helper-1.21.6` 目录
+4. MCP Server 文件位于该目录下的 `dist/mcp-server.js`
+
+**常见安装路径：**
+
+- **Windows**: `C:\Users\<用户名>\.vscode\extensions\sumneko.y3-helper-1.21.6\dist\mcp-server.js`
+- **macOS**: `~/.vscode/extensions/sumneko.y3-helper-1.21.6/dist/mcp-server.js`
+- **Linux**: `~/.vscode/extensions/sumneko.y3-helper-1.21.6/dist/mcp-server.js`
+
+**配置命令：**
 
 **Windows (WSL):**
 ```bash
-claude mcp add -s user y3-helper -- node.exe 'C:\Users\<你的用户名>\Desktop\y3-helper\dist\mcp-server.js'
+claude mcp add -s user y3-helper -- node.exe 'C:\Users\<用户名>\.vscode\extensions\sumneko.y3-helper-1.21.6\dist\mcp-server.js'
 ```
 
 **Windows (PowerShell):**
 ```powershell
-claude mcp add -s user y3-helper -- node.exe "C:\Users\<你的用户名>\Desktop\y3-helper\dist\mcp-server.js"
+claude mcp add -s user y3-helper -- node.exe "C:\Users\<用户名>\.vscode\extensions\sumneko.y3-helper-1.21.6\dist\mcp-server.js"
 ```
 
 **macOS/Linux:**
 ```bash
-claude mcp add -s user y3-helper -- node /path/to/y3-helper/dist/mcp-server.js
+claude mcp add -s user y3-helper -- node ~/.vscode/extensions/sumneko.y3-helper-1.21.6/dist/mcp-server.js
 ```
 
 > **注意**：
 > - 使用 `-s user` 参数配置为**用户级别全局配置**，在任何目录下都可用
-> - 替换路径为你的实际扩展安装路径
+> - 替换 `<用户名>` 为你的实际用户名
+> - 版本号 `1.21.6` 可能会变化，请根据实际安装的版本调整
 > - Windows 用户在 WSL 中使用 `node.exe`，在 PowerShell 中使用 `node`
 
 #### 步骤 3：验证配置
@@ -392,7 +408,28 @@ Claude：好的，我来实现这个功能。
 - 在任何 Y3 项目目录下启动 Claude 都可以使用
 - 只需在 VSCode 中打开对应项目并启动 MCP Server 即可
 
-### Q8: 端口冲突怎么办？
+### Q8: 如何找到扩展的安装路径？
+
+**方法 1：通过 VSCode 命令**
+1. 在 VSCode 中按 `Ctrl+Shift+P`（macOS: `Cmd+Shift+P`）
+2. 输入 "Developer: Open Extensions Folder"
+3. 找到 `sumneko.y3-helper-1.21.6` 目录
+4. 复制完整路径，MCP Server 位于 `dist/mcp-server.js`
+
+**方法 2：手动查找**
+- Windows: `C:\Users\<用户名>\.vscode\extensions\sumneko.y3-helper-1.21.6\`
+- macOS/Linux: `~/.vscode/extensions/sumneko.y3-helper-1.21.6/`
+
+**方法 3：通过命令行**
+```bash
+# Windows (PowerShell)
+Get-ChildItem "$env:USERPROFILE\.vscode\extensions" | Where-Object Name -like "sumneko.y3-helper*"
+
+# macOS/Linux
+ls ~/.vscode/extensions | grep y3-helper
+```
+
+### Q9: 端口冲突怎么办？
 
 **原因**：默认端口 25897 被占用。
 
