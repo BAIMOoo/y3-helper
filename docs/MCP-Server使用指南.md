@@ -88,7 +88,7 @@ Y3-Helper MCP Server 是一个基于 Model Context Protocol (MCP) 的服务，�
 
 **Windows (WSL):**
 ```bash
-claude mcp add -s user y3-helper -- node.exe 'C:\Users\<用户名>\.vscode\extensions\sumneko.y3-helper-1.21.6\dist\mcp-server.js'
+claude mcp add -s user y3-helper -- node /mnt/c/Users/<用户名>/.vscode/extensions/sumneko.y3-helper-1.21.6/dist/mcp-server.js
 ```
 
 **Windows (PowerShell):**

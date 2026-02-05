@@ -48,10 +48,8 @@ export class GameSessionManager extends vscode.Disposable {
 
         try {
             // 构建启动参数
+            // MCP 自动启动游戏时不允许附加调试器
             const luaArgs: Record<string, string> = {};
-            if (options.attach_debugger) {
-                luaArgs['lua_wait_debugger'] = 'true';
-            }
 
             // 启动游戏
             await session.launcher.launch(
@@ -61,8 +59,8 @@ export class GameSessionManager extends vscode.Disposable {
                 options.tracy || false
             );
 
-            // 等待客户端连接（最多 30 秒）
-            const connected = await this.waitForClient(session, 30000);
+            // 等待客户端连接（最多 60 秒，考虑到部分电脑启动较慢）
+            const connected = await this.waitForClient(session, 60000);
 
             if (!connected) {
                 session.status = 'stopped';
