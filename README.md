@@ -4,6 +4,27 @@
 
 # Y3开发助手
 
+## 安装
+
+### 方式一：从 GitHub Release 下载
+
+1. 访问 [Releases 页面](https://github.com/BAIMOoo/y3-helper/releases)
+2. 下载最新版本的 `.vsix` 文件
+3. 在 VSCode 中按 `Ctrl+Shift+P`，输入 `Extensions: Install from VSIX...`
+4. 选择下载的 `.vsix` 文件进行安装
+
+### 方式二：从源码构建
+
+```bash
+git clone https://github.com/BAIMOoo/y3-helper.git
+cd y3-helper
+npm install
+npm run vscode:prepublish
+npx vsce package
+```
+
+然后安装生成的 `.vsix` 文件。
+
 ## 初始化项目（给新建的地图使用，老地图勿用！）
 
 1. 点击左侧栏“Y3开发助手”图标，点击“初始化”
