@@ -23,6 +23,30 @@ export class GameSessionManager extends vscode.Disposable {
      * 启动游戏
      */
     async launchGame(options: any = {}): Promise<any> {
+        // 检查是否已有游戏客户端连接
+        if (Client.allClients.length > 0) {
+            // 如果当前没有会话但有客户端，重新绑定
+            if (!this.currentSession || this.currentSession.status === 'stopped') {
+                const sessionId = `session_${Date.now()}`;
+                const logManager = new LogManager(sessionId);
+                const session: GameSession = {
+                    id: sessionId,
+                    launcher: new GameLauncher(),
+                    logManager,
+                    status: 'running',
+                    startTime: Date.now()
+                };
+                this.currentSession = session;
+                this.attachClient(session, Client.allClients[Client.allClients.length - 1]);
+            }
+            return {
+                success: true,
+                session_id: this.currentSession!.id,
+                status: 'running',
+                message: 'Game is already running'
+            };
+        }
+
         // 如果已有运行中的会话，先停止
         if (this.currentSession && this.currentSession.status !== 'stopped') {
             await this.stopGame();
@@ -52,12 +76,11 @@ export class GameSessionManager extends vscode.Disposable {
             const luaArgs: Record<string, string> = {};
 
             // 启动游戏
-            await session.launcher.launch(
+            await session.launcher.launch({
                 luaArgs,
-                options.multi_mode || false,
-                options.multi_players,
-                options.tracy || false
-            );
+                multi: options.multi_mode ? options.multi_players : undefined,
+                tracy: options.tracy || false
+            });
 
             // 等待客户端连接（最多 60 秒，考虑到部分电脑启动较慢）
             const connected = await this.waitForClient(session, 60000);
@@ -168,7 +191,17 @@ export class GameSessionManager extends vscode.Disposable {
      * 获取游戏状态
      */
     getGameStatus(): any {
+        const hasConnectedClient = Client.allClients.length > 0;
+
         if (!this.currentSession) {
+            if (hasConnectedClient) {
+                return {
+                    running: true,
+                    session_id: null,
+                    status: 'running',
+                    message: 'Game is running (connected client detected, no MCP session)'
+                };
+            }
             return {
                 running: false,
                 session_id: null,
@@ -177,10 +210,11 @@ export class GameSessionManager extends vscode.Disposable {
         }
 
         return {
-            running: this.currentSession.status === 'running',
+            running: this.currentSession.status === 'running' || hasConnectedClient,
             session_id: this.currentSession.id,
             status: this.currentSession.status,
-            uptime: Date.now() - this.currentSession.startTime
+            uptime: Date.now() - this.currentSession.startTime,
+            client_connected: hasConnectedClient
         };
     }
 

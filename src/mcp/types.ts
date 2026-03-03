@@ -1,5 +1,8 @@
 import * as os from 'os';
 import * as path from 'path';
+import type { GameLauncher } from '../launchGame';
+import type { Client } from '../console/client';
+import type { LogManager } from './logManager';
 
 /**
  * 获取 TCP 连接配置
@@ -82,9 +85,9 @@ export interface TCPResponse {
  */
 export interface GameSession {
     id: string;
-    launcher: any;  // GameLauncher 实例
-    client?: any;   // Client 实例
-    logManager: any; // LogManager 实例
+    launcher: GameLauncher;
+    client?: Client;
+    logManager: LogManager;
     status: 'launching' | 'running' | 'stopped' | 'restarting';
     startTime: number;
 }

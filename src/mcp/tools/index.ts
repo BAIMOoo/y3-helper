@@ -31,7 +31,7 @@ export class ToolRegistry {
         // 注册 launch_game 工具
         this.tools.set('launch_game', {
             name: 'launch_game',
-            description: '启动 Y3 游戏。',
+            description: '启动 Y3 游戏。如果游戏已在运行，会直接返回当前状态而不会启动新窗口。建议先调用 get_game_status 检查状态。',
             inputSchema: {
                 type: 'object',
                 properties: {
