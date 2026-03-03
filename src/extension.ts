@@ -7,6 +7,8 @@ moduleAlias.addAliases({
 import * as tools from "./tools";
 import * as vscode from 'vscode';
 import * as mainMenu from './mainMenu';
+import * as os from 'os';
+import * as path from 'path';
 
 import { env } from './env';
 import { runShell } from './runShell';
@@ -302,16 +304,125 @@ class Helper {
             vscode.window.showInformationMessage(l10n.t('MCP Server 已停止'));
         });
 
-        vscode.commands.registerCommand('y3-helper.showMCPSocketPath', () => {
-            const config = mcp.getTCPConfig();
-            const address = `${config.host}:${config.port}`;
-            vscode.window.showInformationMessage(
-                `MCP Server ${l10n.t('地址')}: ${address}`,
-                l10n.t('复制地址')
-            ).then(selection => {
-                if (selection === l10n.t('复制地址')) {
-                    vscode.env.clipboard.writeText(address);
-                    vscode.window.showInformationMessage(l10n.t('已复制到剪贴板'));
+        vscode.commands.registerCommand('y3-helper.configureMCPWindows', async () => {
+            // 1. 检测平台
+            if (os.platform() !== 'win32') {
+                vscode.window.showErrorMessage(l10n.t('此功能仅支持 Windows 平台'));
+                return;
+            }
+
+            // 2. 检测 Claude CLI
+            const claudeCheckProgress = vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在检测 Claude CLI...'),
+                cancellable: false
+            }, async () => {
+                return await tools.wsl.isClaudeInstalledWindows();
+            });
+
+            const claudeInstalled = await claudeCheckProgress;
+            if (!claudeInstalled) {
+                const selection = await vscode.window.showErrorMessage(
+                    l10n.t('未检测到 Claude CLI，请先在 Windows 中安装 Claude Code'),
+                    l10n.t('查看安装指南')
+                );
+                if (selection === l10n.t('查看安装指南')) {
+                    vscode.env.openExternal(vscode.Uri.parse('https://claude.ai/code'));
+                }
+                return;
+            }
+
+            // 3. 执行配置
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在配置 MCP (Windows)...'),
+                cancellable: false
+            }, async () => {
+                const mcpServerPath = path.join(this.context.extensionPath, 'dist', 'mcp-server.js');
+                const result = await tools.wsl.configureMCPInWindows(mcpServerPath);
+
+                if (result.success) {
+                    vscode.window.showInformationMessage(
+                        l10n.t('MCP 配置成功！'),
+                        { detail: result.message, modal: true }
+                    );
+                } else {
+                    vscode.window.showErrorMessage(
+                        l10n.t('MCP 配置失败'),
+                        { detail: result.message, modal: true }
+                    );
+                }
+            });
+        });
+
+        vscode.commands.registerCommand('y3-helper.configureMCPWSL', async () => {
+            // 1. 检测平台
+            if (os.platform() !== 'win32') {
+                vscode.window.showErrorMessage(l10n.t('此功能仅支持 Windows 平台'));
+                return;
+            }
+
+            // 2. 检测 WSL
+            const wslCheckProgress = vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在检测 WSL...'),
+                cancellable: false
+            }, async () => {
+                return await tools.wsl.isWSLAvailable();
+            });
+
+            const wslAvailable = await wslCheckProgress;
+            if (!wslAvailable) {
+                const selection = await vscode.window.showErrorMessage(
+                    l10n.t('未检测到 WSL，请先安装 WSL'),
+                    l10n.t('查看安装指南')
+                );
+                if (selection === l10n.t('查看安装指南')) {
+                    vscode.env.openExternal(vscode.Uri.parse('https://learn.microsoft.com/zh-cn/windows/wsl/install'));
+                }
+                return;
+            }
+
+            // 3. 检测 Claude CLI
+            const claudeCheckProgress = vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在检测 Claude CLI...'),
+                cancellable: false
+            }, async () => {
+                return await tools.wsl.isClaudeInstalled();
+            });
+
+            const claudeInstalled = await claudeCheckProgress;
+            if (!claudeInstalled) {
+                const selection = await vscode.window.showErrorMessage(
+                    l10n.t('未检测到 Claude CLI，请先在 WSL 中安装 Claude Code'),
+                    l10n.t('查看安装指南')
+                );
+                if (selection === l10n.t('查看安装指南')) {
+                    vscode.env.openExternal(vscode.Uri.parse('https://claude.ai/code'));
+                }
+                return;
+            }
+
+            // 4. 执行配置
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在配置 MCP (WSL)...'),
+                cancellable: false
+            }, async () => {
+                const mcpServerPath = path.join(this.context.extensionPath, 'dist', 'mcp-server.js');
+                const result = await tools.wsl.configureMCPInWSL(mcpServerPath);
+
+                if (result.success) {
+                    vscode.window.showInformationMessage(
+                        l10n.t('MCP 配置成功！'),
+                        { detail: result.message, modal: true }
+                    );
+                } else {
+                    vscode.window.showErrorMessage(
+                        l10n.t('MCP 配置失败'),
+                        { detail: result.message, modal: true }
+                    );
                 }
             });
         });

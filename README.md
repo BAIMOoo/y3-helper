@@ -91,6 +91,34 @@ npx vsce package
 * `5-excel生成物编·极.js`
 * `6-更多的演示` （会根据作者需求逐步更新）
 
+### MCP
+
+Y3-Helper MCP Server 是一个基于 Model Context Protocol (MCP) 的服务，让 Claude Code 能够自动化控制 Y3 游戏的开发、测试和调试流程。
+
+#### 快速配置
+
+**Windows 原生环境**
+
+如果你在 Windows 上直接使用 Claude Code（非 WSL），可以通过以下步骤一键配置：
+
+1. 在侧边栏的”Y3开发助手”中点击 `MCP Server/配置 MCP (Windows)`
+2. 扩展会自动检测 Claude CLI 并完成配置
+3. 配置成功后，在命令行中启动 `claude`，输入 `/mcp` 检查连接是否正常
+
+**WSL 环境**
+
+如果你在 Windows 上使用 WSL 环境的 Claude Code，可以通过以下步骤一键配置：
+
+1. 在侧边栏的”Y3开发助手”中点击 `MCP Server/配置 MCP (WSL)`
+2. 扩展会自动检测 WSL 和 Claude CLI，并完成配置
+3. 配置成功后，在 WSL 终端中启动 `claude`，输入 `/mcp` 检查连接是否正常
+
+#### 手动配置
+
+在侧边栏的”Y3开发助手”中点击 `MCP Server/启动 MCP Server` 后，启动 Claude Code 并输入 `/mcp` 检查链接是否正常。
+
+详细配置说明请参考 [MCP Server 使用指南](./docs/MCP-Server使用指南.md)。
+
 ## 如何对本插件进行二次开发？
 
 1. 安装`vscode`和`Node.js`
