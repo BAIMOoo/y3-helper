@@ -7,3 +7,5 @@ node_modules
 tmp
 dist
 docs
+.claude
+CLAUDE.md
