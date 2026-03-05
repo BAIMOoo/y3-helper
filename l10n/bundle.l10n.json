@@ -258,5 +258,6 @@
   "正在配置 MCP (WSL)...": "Configuring MCP (WSL)...",
   "正在配置 MCP (Windows)...": "Configuring MCP (Windows)...",
   "MCP 配置成功！": "MCP configured successfully!",
-  "MCP 配置失败": "MCP configuration failed"
+  "MCP 配置失败": "MCP configuration failed",
+  "打开地图根目录": "Open Map Root Directory"
 }

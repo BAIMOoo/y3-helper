@@ -40,6 +40,12 @@ export class 地图管理 extends TreeNode {
                 node.childs.push(new TreeNode(l10n.t('------------------'), {
                     tooltip: l10n.t('我只是一个分割线'),
                 }));
+                if (y3.env.projectUri) {
+                    let openScriptFolder = new ViewInVSCode(y3.env.projectUri, l10n.t('打开地图根目录'));
+                    openScriptFolder.description = l10n.t('打开地图根目录');
+                    openScriptFolder.tooltip = l10n.t('会重启VSCode窗口');
+                    node.childs.push(openScriptFolder);
+                }
                 if (y3.env.scriptUri) {
                     let openScriptFolder = new ViewInVSCode(y3.env.scriptUri, l10n.t('打开脚本目录'));
                     openScriptFolder.description = currentMap?.name;
