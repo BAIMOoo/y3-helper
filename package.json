@@ -364,6 +364,11 @@
                 "command": "y3-helper.selectLaunchingMap",
                 "title": "选择启动地图",
                 "category": "%Y3开发助手%"
+            },
+            {
+                "command": "y3-helper.generateUIFramework",
+                "title": "生成UI框架",
+                "category": "%Y3开发助手%"
             }
         ],
         "configuration": {
