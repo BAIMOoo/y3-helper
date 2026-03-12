@@ -5,6 +5,7 @@ import { LogManager } from './logManager';
 import { GameSession, MCPError, MCPErrorCode } from './types';
 import * as env from '../env';
 import * as tools from '../tools';
+import * as path from 'path';
 
 /**
  * 游戏会话管理器
@@ -384,6 +385,63 @@ export class GameSessionManager extends vscode.Disposable {
             success: true,
             message: 'Game stopped'
         };
+    }
+
+    /**
+     * 捕获游戏截图
+     */
+    async captureScreenshot(): Promise<any> {
+        // 检查是否有活动会话
+        if (!this.currentSession || this.currentSession.status === 'stopped') {
+            return {
+                success: false,
+                error: '游戏未运行，请先启动游戏'
+            };
+        }
+
+        const session = this.currentSession;
+
+        // 检查客户端是否连接
+        if (!session.client) {
+            return {
+                success: false,
+                error: '游戏客户端未连接'
+            };
+        }
+
+        // 检查编辑器路径
+        if (!env.env.editorUri) {
+            return {
+                success: false,
+                error: '编辑器路径未找到'
+            };
+        }
+
+        try {
+            // 执行 Lua 代码获取分辨率并截图
+            const luaCode = `
+            local width = GameAPI.get_game_x_resolution()
+            local height = GameAPI.get_game_y_resolution()
+            GameAPI.screenshot_func_for_lua("mcp_screenshots", "screenshot", width, height)
+        `;
+
+            session.client.notify('command', { data: luaCode });
+
+            // 构建截图文件路径
+            const screenshotPath = path.normalize(
+                path.join(env.env.editorUri.fsPath, '../LocalData/mcp_screenshots/screenshot.png')
+            );
+
+            return {
+                success: true,
+                screenshot_path: screenshotPath
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: `截图命令执行失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
     }
 
     /**
