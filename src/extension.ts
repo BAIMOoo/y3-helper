@@ -364,18 +364,18 @@ class Helper {
             }
 
             // 2. 显示环境选择对话框
-            const choice = await vscode.window.showQuickPick([
+            const options = [
                 {
                     label: l10n.t('Windows 环境'),
                     description: l10n.t('在 Windows 中配置 Claude Code'),
-                    value: 'windows'
                 },
                 {
                     label: l10n.t('WSL 环境'),
                     description: l10n.t('在 WSL 中配置 Claude Code'),
-                    value: 'wsl'
                 }
-            ], {
+            ];
+
+            const choice = await vscode.window.showQuickPick(options, {
                 placeHolder: l10n.t('选择要配置的环境'),
                 title: l10n.t('配置 Claude Code MCP')
             });
@@ -385,7 +385,7 @@ class Helper {
             }
 
             // 3. 根据选择执行对应的配置
-            if (choice.value === 'windows') {
+            if (choice === options[0]) {
                 await vscode.commands.executeCommand('y3-helper.configureMCPWindows');
             } else {
                 await vscode.commands.executeCommand('y3-helper.configureMCPWSL');
