@@ -105,6 +105,16 @@ export class ToolRegistry {
                 properties: {}
             }
         });
+
+        // 注册 capture_screenshot 工具
+        this.tools.set('capture_screenshot', {
+            name: 'capture_screenshot',
+            description: '捕获游戏截图。使用客户端当前分辨率，保存到编辑器安装路径下的 LocalData/mcp_screenshots/screenshot.png。返回截图文件的绝对路径。',
+            inputSchema: {
+                type: 'object',
+                properties: {}
+            }
+        });
     }
 
     /**
