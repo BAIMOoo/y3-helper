@@ -110,6 +110,9 @@ export class TCPServer extends vscode.Disposable {
                 case 'quick_restart':
                     result = await this.sessionManager.quickRestart();
                     break;
+                case 'capture_screenshot':
+                    result = await this.sessionManager.captureScreenshot();
+                    break;
                 default:
                     throw new Error(`Unknown method: ${method}`);
             }
