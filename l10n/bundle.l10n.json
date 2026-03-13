@@ -259,5 +259,12 @@
   "正在配置 MCP (Windows)...": "Configuring MCP (Windows)...",
   "MCP 配置成功！": "MCP configured successfully!",
   "MCP 配置失败": "MCP configuration failed",
-  "打开地图根目录": "Open Map Root Directory"
+  "打开地图根目录": "Open Map Root Directory",
+  "配置 Claude Code MCP": "Configure Claude Code MCP",
+  "自动配置 Claude Code MCP 连接": "Automatically configure Claude Code MCP connection",
+  "Windows 环境": "Windows Environment",
+  "在 Windows 中配置 Claude Code": "Configure Claude Code in Windows",
+  "WSL 环境": "WSL Environment",
+  "在 WSL 中配置 Claude Code": "Configure Claude Code in WSL",
+  "选择要配置的环境": "Select the environment to configure"
 }

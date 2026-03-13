@@ -356,6 +356,42 @@ class Helper {
             vscode.window.showInformationMessage(l10n.t('MCP Server 已停止'));
         });
 
+        vscode.commands.registerCommand('y3-helper.configureMCP', async () => {
+            // 1. 检测平台
+            if (os.platform() !== 'win32') {
+                vscode.window.showErrorMessage(l10n.t('此功能仅支持 Windows 平台'));
+                return;
+            }
+
+            // 2. 显示环境选择对话框
+            const options = [
+                {
+                    label: l10n.t('Windows 环境'),
+                    description: l10n.t('在 Windows 中配置 Claude Code'),
+                },
+                {
+                    label: l10n.t('WSL 环境'),
+                    description: l10n.t('在 WSL 中配置 Claude Code'),
+                }
+            ];
+
+            const choice = await vscode.window.showQuickPick(options, {
+                placeHolder: l10n.t('选择要配置的环境'),
+                title: l10n.t('配置 Claude Code MCP')
+            });
+
+            if (!choice) {
+                return; // 用户取消
+            }
+
+            // 3. 根据选择执行对应的配置
+            if (choice === options[0]) {
+                await vscode.commands.executeCommand('y3-helper.configureMCPWindows');
+            } else {
+                await vscode.commands.executeCommand('y3-helper.configureMCPWSL');
+            }
+        });
+
         vscode.commands.registerCommand('y3-helper.configureMCPWindows', async () => {
             // 1. 检测平台
             if (os.platform() !== 'win32') {
