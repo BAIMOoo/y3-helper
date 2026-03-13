@@ -14,6 +14,8 @@ import * as path from 'path';
 export class GameSessionManager extends vscode.Disposable {
     private currentSession?: GameSession;
     private clientCheckInterval?: NodeJS.Timeout;
+    private isLaunching: boolean = false;  // 启动中标记，防止重复启动
+    private cancelLaunch: boolean = false;  // 取消启动标记
 
     constructor() {
         super(() => this.dispose());
@@ -21,9 +23,20 @@ export class GameSessionManager extends vscode.Disposable {
     }
 
     /**
-     * 启动游戏
+     * 启动游戏（非阻塞）
+     * 立即返回启动状态，通过 get_game_status 轮询启动结果
      */
     async launchGame(options: any = {}): Promise<any> {
+        // 检查是否正在启动中
+        if (this.isLaunching) {
+            return {
+                success: true,
+                status: 'launching',
+                session_id: this.currentSession?.id || null,
+                message: 'Game is already launching, please wait. Use get_game_status to check progress.'
+            };
+        }
+
         // 检查是否已有游戏客户端连接
         if (Client.allClients.length > 0) {
             // 如果当前没有会话但有客户端，重新绑定
@@ -53,9 +66,23 @@ export class GameSessionManager extends vscode.Disposable {
             await this.stopGame();
         }
 
+        // 设置启动标记（必须在 await 之前，防止并发调用通过检查）
+        this.isLaunching = true;
+        this.cancelLaunch = false;
+
         // 等待环境就绪
         await env.env.editorReady();
         await env.env.mapReady();
+
+        // 检查是否在等待期间被取消
+        if (this.cancelLaunch) {
+            this.isLaunching = false;
+            return {
+                success: false,
+                status: 'stopped',
+                message: 'Game launch was cancelled'
+            };
+        }
 
         // 创建会话
         const sessionId = `session_${Date.now()}`;
@@ -71,9 +98,30 @@ export class GameSessionManager extends vscode.Disposable {
 
         this.currentSession = session;
 
+        // 非阻塞启动：在后台执行启动流程
+        this.launchGameAsync(session, options);
+
+        return {
+            success: true,
+            session_id: sessionId,
+            status: 'launching',
+            message: 'Game is launching. Use get_game_status to check when it is ready.'
+        };
+    }
+
+    /**
+     * 异步启动游戏（后台执行）
+     */
+    private async launchGameAsync(session: GameSession, options: any): Promise<void> {
         try {
-            // 构建启动参数
-            // MCP 自动启动游戏时不允许附加调试器
+            // 检查是否被取消
+            if (this.cancelLaunch) {
+                session.status = 'stopped';
+                session.errorMessage = 'Launch cancelled';
+                this.isLaunching = false;
+                return;
+            }
+
             const luaArgs: Record<string, string> = {};
 
             // 启动游戏
@@ -83,33 +131,35 @@ export class GameSessionManager extends vscode.Disposable {
                 tracy: options.tracy || false
             });
 
-            // 等待客户端连接（最多 60 秒，考虑到部分电脑启动较慢）
-            const connected = await this.waitForClient(session, 60000);
+            // 再次检查是否被取消
+            if (this.cancelLaunch) {
+                session.status = 'stopped';
+                session.errorMessage = 'Launch cancelled';
+                await session.launcher.stop();
+                this.isLaunching = false;
+                return;
+            }
+
+            // 等待客户端连接（最多 110 秒，考虑到部分电脑启动较慢）
+            const connected = await this.waitForClient(session, 110000);
 
             if (!connected) {
                 session.status = 'stopped';
-                return {
-                    success: false,
-                    session_id: sessionId,
-                    status: 'stopped',
-                    message: 'Game launched but client connection timeout'
-                };
+                session.errorMessage = 'Game launched but client connection timeout (waited 110 seconds)';
+                tools.log.warn(`[MCP] ${session.errorMessage}`);
+                // 超时后主动停止游戏进程
+                try {
+                    await session.launcher.stop();
+                } catch (stopError) {
+                    tools.log.error(`[MCP] Failed to stop game after timeout: ${stopError}`);
+                }
             }
-
-            return {
-                success: true,
-                session_id: sessionId,
-                status: session.status,
-                message: 'Game launched successfully'
-            };
-
         } catch (error) {
             session.status = 'stopped';
-            throw new MCPError(
-                `游戏启动失败: ${error instanceof Error ? error.message : String(error)}`,
-                MCPErrorCode.GAME_LAUNCH_FAILED,
-                { originalError: error }
-            );
+            session.errorMessage = error instanceof Error ? error.message : String(error);
+            tools.log.error(`[MCP] 游戏启动失败: ${session.errorMessage}`);
+        } finally {
+            this.isLaunching = false;
         }
     }
 
@@ -120,6 +170,8 @@ export class GameSessionManager extends vscode.Disposable {
         const startTime = Date.now();
 
         while (Date.now() - startTime < timeout) {
+            // 检查客户端是否已连接且状态为 running
+            // attachClient 会将状态设置为 running，所以只需检查 running 状态
             if (session.client && session.status === 'running') {
                 return true;
             }
@@ -194,6 +246,17 @@ export class GameSessionManager extends vscode.Disposable {
     getGameStatus(): any {
         const hasConnectedClient = Client.allClients.length > 0;
 
+        // 如果正在启动中，返回启动状态
+        if (this.isLaunching) {
+            return {
+                running: false,
+                session_id: this.currentSession?.id || null,
+                status: 'launching',
+                message: 'Game is launching, please wait...',
+                error: this.currentSession?.errorMessage || undefined
+            };
+        }
+
         if (!this.currentSession) {
             if (hasConnectedClient) {
                 return {
@@ -215,7 +278,8 @@ export class GameSessionManager extends vscode.Disposable {
             session_id: this.currentSession.id,
             status: this.currentSession.status,
             uptime: Date.now() - this.currentSession.startTime,
-            client_connected: hasConnectedClient
+            client_connected: hasConnectedClient,
+            error: this.currentSession.errorMessage || undefined
         };
     }
 
@@ -314,14 +378,15 @@ export class GameSessionManager extends vscode.Disposable {
         // 发送 .rr 命令
         this.currentSession.client.notify('command', { data: '.rr' });
 
-        // 等待客户端重新连接（最多 10 秒）
-        const reconnected = await this.waitForClient(this.currentSession, 10000);
+        // 等待客户端重新连接（最多 60 秒，游戏重启可能需要较长时间）
+        const reconnected = await this.waitForClient(this.currentSession, 60000);
 
         if (!reconnected) {
             this.currentSession.status = 'stopped';
+            this.currentSession.errorMessage = 'Game restart timeout - client did not reconnect within 60 seconds';
             return {
                 success: false,
-                message: 'Game restart timeout - client did not reconnect'
+                message: this.currentSession.errorMessage
             };
         }
 
@@ -340,6 +405,11 @@ export class GameSessionManager extends vscode.Disposable {
      * 停止游戏
      */
     async stopGame(params: any = {}): Promise<any> {
+        // 设置取消标记，防止启动过程继续
+        this.cancelLaunch = true;
+        // 清除启动中状态，防止启动过程中停止后无法重新启动
+        this.isLaunching = false;
+
         if (!this.currentSession) {
             return {
                 success: false,

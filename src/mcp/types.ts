@@ -90,4 +90,5 @@ export interface GameSession {
     logManager: LogManager;
     status: 'launching' | 'running' | 'stopped' | 'restarting';
     startTime: number;
+    errorMessage?: string;
 }

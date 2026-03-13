@@ -96,7 +96,7 @@ export class TCPClient {
         const request: TCPRequest = { id, method, params };
 
         return new Promise((resolve, reject) => {
-            // 设置超时
+            // 设置超时（30 秒）
             const timeout = setTimeout(() => {
                 this.pendingRequests.delete(id);
                 reject(new Error(`Request timeout: ${method}`));

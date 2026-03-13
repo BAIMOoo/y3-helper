@@ -31,7 +31,7 @@ export class ToolRegistry {
         // 注册 launch_game 工具
         this.tools.set('launch_game', {
             name: 'launch_game',
-            description: '启动 Y3 游戏。如果游戏已在运行，会直接返回当前状态而不会启动新窗口。建议先调用 get_game_status 检查状态。',
+            description: '启动 Y3 游戏（非阻塞）。调用后立即返回，不会等待游戏完全启动。你必须随后使用 get_game_status 轮询，直到 status 变为 "running"。如果游戏已在运行，会直接返回当前状态。',
             inputSchema: {
                 type: 'object',
                 properties: {
