@@ -31,7 +31,7 @@ export class ToolRegistry {
         // 注册 launch_game 工具
         this.tools.set('launch_game', {
             name: 'launch_game',
-            description: '启动 Y3 游戏（非阻塞）。调用后立即返回，不会等待游戏完全启动。你必须随后使用 get_game_status 轮询，直到 status 变为 "running"。如果游戏已在运行，会直接返回当前状态。',
+            description: '启动 Y3 游戏（非阻塞）。调用后立即返回，不会等待游戏完全启动。你必须随后每10s使用 get_game_status 轮询(无次数上限)，直到 status 变为 "running"。如果游戏已在运行，会直接返回当前状态。',
             inputSchema: {
                 type: 'object',
                 properties: {
