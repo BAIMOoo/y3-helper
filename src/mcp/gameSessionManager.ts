@@ -434,7 +434,8 @@ export class GameSessionManager extends vscode.Disposable {
 
             return {
                 success: true,
-                screenshot_path: screenshotPath
+                screenshot_path: screenshotPath,
+                message: `重要提示：如果你需要查看截图内容，请使用合适的 Read 工具读取此文件。如果 Read 工具无法读取图片或返回空内容，请不要猜测图片内容，而应该：1) 明确告知用户"无法读取截图文件"；2) 提供截图文件路径让用户手动查看；3) 不要编造或假设图片中的内容。`
             };
         } catch (error) {
             return {

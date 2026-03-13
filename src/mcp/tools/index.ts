@@ -109,7 +109,7 @@ export class ToolRegistry {
         // 注册 capture_screenshot 工具
         this.tools.set('capture_screenshot', {
             name: 'capture_screenshot',
-            description: '捕获游戏截图。使用客户端当前分辨率，保存到编辑器安装路径下的 LocalData/mcp_screenshots/screenshot.png。返回截图文件的绝对路径。',
+            description: '捕获当前游戏画面的截图。前置条件：游戏必须处于运行状态（先调用 get_game_status 确认）。用于验证 UI 显示效果、调试界面问题、记录游戏状态或生成文档。截图使用客户端当前分辨率，自动保存到编辑器安装路径下的 LocalData/mcp_screenshots/screenshot.png。成功时返回截图文件的绝对路径，失败时返回明确的错误原因和解决建议。常见使用场景：启动游戏后验证界面、执行 Lua 代码后查看效果、调试 UI 布局问题、记录错误发生时的画面。',
             inputSchema: {
                 type: 'object',
                 properties: {}
