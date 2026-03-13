@@ -17,6 +17,10 @@ export class GameSessionManager extends vscode.Disposable {
     private isLaunching: boolean = false;  // 启动中标记，防止重复启动
     private cancelLaunch: boolean = false;  // 取消启动标记
 
+    // 超时常量
+    private readonly LAUNCH_TIMEOUT_MS = 110000;  // 启动超时时间（110秒）
+    private readonly RESTART_TIMEOUT_MS = 60000;  // 快速重启超时时间（60秒）
+
     constructor() {
         super(() => this.dispose());
         this.startClientMonitoring();
@@ -70,18 +74,24 @@ export class GameSessionManager extends vscode.Disposable {
         this.isLaunching = true;
         this.cancelLaunch = false;
 
-        // 等待环境就绪
-        await env.env.editorReady();
-        await env.env.mapReady();
+        try {
+            // 等待环境就绪
+            await env.env.editorReady();
+            await env.env.mapReady();
 
-        // 检查是否在等待期间被取消
-        if (this.cancelLaunch) {
+            // 检查是否在等待期间被取消
+            if (this.cancelLaunch) {
+                this.isLaunching = false;
+                return {
+                    success: false,
+                    status: 'stopped',
+                    message: 'Game launch was cancelled'
+                };
+            }
+        } catch (error) {
+            // 环境初始化失败，清除启动标记
             this.isLaunching = false;
-            return {
-                success: false,
-                status: 'stopped',
-                message: 'Game launch was cancelled'
-            };
+            throw error;
         }
 
         // 创建会话
@@ -98,8 +108,13 @@ export class GameSessionManager extends vscode.Disposable {
 
         this.currentSession = session;
 
-        // 非阻塞启动：在后台执行启动流程
-        this.launchGameAsync(session, options);
+        // 非阻塞启动：在后台执行启动流程，捕获未预期的异常
+        this.launchGameAsync(session, options).catch(error => {
+            tools.log.error(`[MCP] Unexpected error in launchGameAsync: ${error}`);
+            session.status = 'stopped';
+            session.errorMessage = `Unexpected error during launch: ${error instanceof Error ? error.message : String(error)}`;
+            this.isLaunching = false;
+        });
 
         return {
             success: true,
@@ -135,24 +150,19 @@ export class GameSessionManager extends vscode.Disposable {
             if (this.cancelLaunch) {
                 session.status = 'stopped';
                 session.errorMessage = 'Launch cancelled';
-                await session.launcher.stop();
                 this.isLaunching = false;
                 return;
             }
 
             // 等待客户端连接（最多 110 秒，考虑到部分电脑启动较慢）
-            const connected = await this.waitForClient(session, 110000);
+            const connected = await this.waitForClient(session, this.LAUNCH_TIMEOUT_MS);
 
             if (!connected) {
                 session.status = 'stopped';
                 session.errorMessage = 'Game launched but client connection timeout (waited 110 seconds)';
-                tools.log.warn(`[MCP] ${session.errorMessage}`);
-                // 超时后主动停止游戏进程
-                try {
-                    await session.launcher.stop();
-                } catch (stopError) {
-                    tools.log.error(`[MCP] Failed to stop game after timeout: ${stopError}`);
-                }
+                tools.log.error(`[MCP] ${session.errorMessage}`);
+                this.isLaunching = false;
+                return;
             }
         } catch (error) {
             session.status = 'stopped';
@@ -171,7 +181,7 @@ export class GameSessionManager extends vscode.Disposable {
 
         while (Date.now() - startTime < timeout) {
             // 检查客户端是否已连接且状态为 running
-            // attachClient 会将状态设置为 running，所以只需检查 running 状态
+            // attachClient 会设置 client 并将状态改为 running（适用于 launching 和 restarting）
             if (session.client && session.status === 'running') {
                 return true;
             }
@@ -379,7 +389,7 @@ export class GameSessionManager extends vscode.Disposable {
         this.currentSession.client.notify('command', { data: '.rr' });
 
         // 等待客户端重新连接（最多 60 秒，游戏重启可能需要较长时间）
-        const reconnected = await this.waitForClient(this.currentSession, 60000);
+        const reconnected = await this.waitForClient(this.currentSession, this.RESTART_TIMEOUT_MS);
 
         if (!reconnected) {
             this.currentSession.status = 'stopped';
