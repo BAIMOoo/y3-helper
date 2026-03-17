@@ -11,7 +11,7 @@ import type { LogManager } from './logManager';
 export function getTCPConfig(): { host: string; port: number } {
     return {
         host: '127.0.0.1',
-        port: 25897  // Y3-Helper MCP 端口
+        port: 25897  // Y3-Helper MCP 内部通信端口
     };
 }
 

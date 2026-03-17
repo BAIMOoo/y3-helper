@@ -4,11 +4,17 @@ import { TCPClient } from './tcpClient';
 import { ToolRegistry } from './tools';
 
 /**
- * MCP Server 主入口
+ * MCP Server 主入口（stdio 模式）
+ * 
+ * 这是一个备用方案，主要用于兼容不支持 Streamable HTTP 的 MCP 客户端。
+ * 推荐使用扩展内置的 Streamable HTTP 服务（端口 8766）。
+ * 
+ * 使用方式：
+ *   node mcp-server.js
  */
 async function main() {
     try {
-        console.error('[MCP] Starting MCP Server...');
+        console.error('[MCP] Starting MCP Server in STDIO mode...');
 
         // 1. 连接到扩展的 TCP 服务器
         const tcpClient = new TCPClient();
@@ -25,7 +31,7 @@ async function main() {
         const transport = new StdioTransport(protocol);
         await transport.start();
 
-        console.error('[MCP] MCP Server started successfully');
+        console.error('[MCP] MCP Server started successfully in stdio mode');
 
         // 处理进程退出
         process.on('SIGINT', () => {
