@@ -29,6 +29,7 @@ import * as ecaCompiler from './ecaCompiler';
 import * as uiFramework from './uiFramework';
 import * as l10n from '@vscode/l10n';
 import * as mcp from './mcp';
+import { initCodeMaker, stopCodeMaker } from './codemaker';
 
 class Helper {
     private context: vscode.ExtensionContext;
@@ -591,6 +592,11 @@ export async function activate(context: vscode.ExtensionContext) {
     let helper = new Helper(context);
 
     helper.start();
+
+    // 初始化 CodeMaker 模块
+    initCodeMaker(context);
 }
 
-export function deactivate() {}
+export function deactivate() {
+    stopCodeMaker();
+}

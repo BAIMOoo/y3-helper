@@ -44,6 +44,13 @@
                     "id": "y3-helper.custom",
                     "name": "%自定义视图%"
                 }
+            ],
+            "codemaker-sidebar": [
+                {
+                    "type": "webview",
+                    "id": "codemaker.webview",
+                    "name": "CodeMaker AI"
+                }
             ]
         },
         "menus": {
@@ -163,6 +170,13 @@
                     "id": "y3-helper",
                     "title": "%Y3开发助手%",
                     "icon": "image/logo.png"
+                }
+            ],
+            "secondarySidebar": [
+                {
+                    "id": "codemaker-sidebar",
+                    "title": "CodeMaker",
+                    "icon": "$(hubot)"
                 }
             ]
         },
@@ -369,6 +383,11 @@
                 "command": "y3-helper.generateUIFramework",
                 "title": "生成UI框架",
                 "category": "%Y3开发助手%"
+            },
+            {
+                "command": "y3-helper.codemaker.open",
+                "title": "打开 CodeMaker",
+                "category": "%Y3开发助手%"
             }
         ],
         "configuration": {
@@ -418,6 +437,27 @@
                         "zh-cn",
                         "en"
                     ],
+                    "scope": "resource"
+                },
+                "CodeMaker.CodeChatApiKey": {
+                    "title": "CodeMaker API Key",
+                    "description": "CodeMaker AI 聊天使用的 API Key",
+                    "type": "string",
+                    "default": "",
+                    "scope": "resource"
+                },
+                "CodeMaker.CodeChatApiBaseUrl": {
+                    "title": "CodeMaker API Base URL",
+                    "description": "CodeMaker AI 聊天使用的 API 基础地址",
+                    "type": "string",
+                    "default": "",
+                    "scope": "resource"
+                },
+                "CodeMaker.CodeChatModel": {
+                    "title": "CodeMaker 默认模型",
+                    "description": "CodeMaker AI 聊天使用的默认模型名称（如 gpt-4o, deepseek-chat）",
+                    "type": "string",
+                    "default": "",
                     "scope": "resource"
                 }
             }

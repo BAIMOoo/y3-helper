@@ -1,3 +1,4 @@
 单号,change-id,归档日期,代码行数,SVN版本,备注
 98274,docs-vscode-plugin-learning-98274,2026-03-13,0,-,文档学习任务，不涉及代码修改。产出：开发指南文档+Skill
 98336,feat-ui-framework-98336,2026-03-13,1748,-,补充UI框架。新增1748行(全部AI辅助)。含UI模板文件+uiFramework.ts核心模块+命令注册+菜单集成
+98275,feat-codemaker-integration-with-y3helper-98275,2026-03-18,1424,-,CodeMaker AI助手集成。新增1424行(全部AI辅助)。含WebviewProvider+ApiServer+ConfigProvider+消息桥+API Server路由+聊天历史持久化+webview构建产物
