@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { GameLauncher } from '../launchGame';
 import { Client } from '../console/client';
@@ -5,7 +6,7 @@ import { LogManager } from './logManager';
 import { GameSession, MCPError, MCPErrorCode } from './types';
 import * as env from '../env';
 import * as tools from '../tools';
-import * as path from 'path';
+import { save as saveGmp } from '../tools/y3SaveGmp';
 
 /**
  * 游戏会话管理器
@@ -29,8 +30,42 @@ export class GameSessionManager extends vscode.Disposable {
     /**
      * 启动游戏（非阻塞）
      * 立即返回启动状态，通过 get_game_status 轮询启动结果
+     * 调用 TypeScript 版本保存 GMP（物编和 UI）
+     */
+    private async saveGmpBeforeLaunch(): Promise<void> {
+        const mapUri = env.env.triggerMapUri ?? env.env.mapUri;
+        if (!mapUri) {
+            tools.log.warn('[MCP] 未找到地图路径，跳过 GMP 保存');
+            return;
+        }
+
+        const mapPath = mapUri.fsPath;
+
+        try {
+            tools.log.info(`[MCP] 正在保存 GMP (物编 + UI)...`);
+            const result = await saveGmp(mapPath, {
+                updatePrefabs: true,
+                updateUI: true
+            });
+            
+            if (result.success) {
+                tools.log.info(`[MCP] GMP 保存完成: ${result.message}`);
+            } else {
+                tools.log.warn(`[MCP] GMP 保存失败: ${result.message}`);
+            }
+        } catch (error) {
+            // 保存失败不阻止游戏启动，只记录警告
+            tools.log.warn(`[MCP] GMP 保存失败: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    /**
+     * 启动游戏
      */
     async launchGame(options: any = {}): Promise<any> {
+        // 第一步：保存 GMP（物编 + UI）
+        await this.saveGmpBeforeLaunch();
+
         // 检查是否正在启动中
         if (this.isLaunching) {
             return {
@@ -364,6 +399,9 @@ export class GameSessionManager extends vscode.Disposable {
      * 快速重启游戏（.rr 命令）
      */
     async quickRestart(): Promise<any> {
+        // 第一步：保存 GMP（物编 + UI）
+        await this.saveGmpBeforeLaunch();
+
         if (!this.currentSession) {
             throw new MCPError(
                 '没有活动的游戏会话',
