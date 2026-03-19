@@ -454,8 +454,8 @@
                     "scope": "resource"
                 },
                 "CodeMaker.CodeChatModel": {
-                    "title": "CodeMaker 默认模型",
-                    "description": "CodeMaker AI 聊天使用的默认模型名称（如 gpt-4o, deepseek-chat）",
+                    "title": "CodeMaker 固定模型",
+                    "description": "填写后将锁定 CodeMaker 聊天模型为该值，不可在 UI 中切换。留空则允许用户自由选择。支持任意模型名称。",
                     "type": "string",
                     "default": "",
                     "scope": "resource"

@@ -4,3 +4,4 @@
 
 98280,vscode-save-gmp,2026-03-17,1144,-,GMP保存功能。从Python迁移到TypeScript实现。含y3SaveGmp.ts核心模块+MCP工具集成+游戏启动自动保存
 98275,feat-codemaker-integration-with-y3helper-98275,2026-03-18,1424,-,CodeMaker AI助手集成。新增1424行(全部AI辅助)。含WebviewProvider+ApiServer+ConfigProvider+消息桥+API Server路由+聊天历史持久化+webview构建产物
+98275,feat-codemaker-fixed-model-setting,2026-03-19,~50,-,CodeMaker固定模型设置。在Settings中填写模型名后锁定UI模型选择。修改Extension端+前端源码(extension.ts/App.tsx/chat-config.ts/ChatModelSelector.tsx)+重新构建webview

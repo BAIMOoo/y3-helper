@@ -172,6 +172,8 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
                 codeChatApiKey: config.apiKey,
                 codeChatApiBaseUrl: config.apiBaseUrl,
                 codeChatModel: config.model,
+                // 固定模型：非空时前端会锁定模型选择器，直接显示该值
+                fixedModel: config.model,
 
                 // UI 设置
                 submitKey: 'Enter',
