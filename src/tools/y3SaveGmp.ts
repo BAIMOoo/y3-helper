@@ -1,21 +1,26 @@
 /**
  * Y3 GMP 保存钩子 (y3_save_gmp)
  *
- * 当 AI 对以下目录进行增删改时，在所有操作完成后调用一次 save() 函数：
- * - editor_table/ : 物编 JSON 文件
- * - ui/           : UI JSON 文件（面板、层、配置）
+ * 当 AI 对以下目录/文件进行增删改时，在所有操作完成后调用一次 save() 函数：
+ * - editor_table/    : 物编 JSON 文件
+ * - ui/              : UI JSON 文件（面板、层、配置）
+ * - uslanguage.json  : 英文语言文件
+ * - zhlanguage.json  : 中文语言文件
  *
  * 核心原则：无论修改一个还是多个文件，只在最后调用一次 save()！
  *
  * 主要接口：
- * - save(mapPath)                         : 统一入口，同时更新物编和 UI
- * - save(mapPath, { updateUI: false })    : 仅更新物编
- * - save(mapPath, { updatePrefabs: false }): 仅更新 UI
+ * - save(mapPath)                              : 统一入口，同时更新物编、UI 和语言
+ * - save(mapPath, { updateUI: false })         : 仅更新物编和语言
+ * - save(mapPath, { updatePrefabs: false })    : 仅更新 UI 和语言
+ * - save(mapPath, { updateUSLanguage: false }) : 不更新英文语言
+ * - save(mapPath, { updateZHLanguage: false }) : 不更新中文语言
  *
  * 技术细节：
- * - 物编 Section: 新版 Section（ID > 200，MD5 哈希索引）
- * - UI Section:   旧版 Section（ID = 10，固定索引）
- * - 序列化流程:   JSON -> msgpack -> zstd
+ * - 物编 Section:      新版 Section（ID > 200，MD5 哈希索引），序列化: dict -> JSON string -> msgpack -> zstd
+ * - UI Section:        旧版 Section（ID = 10，固定索引），序列化: dict -> msgpack -> zstd
+ * - USLanguage Section: 旧版 Section（ID = 49，固定索引），序列化: dict -> msgpack -> zstd
+ * - ZHLanguage Section: 旧版 Section（ID = 50，固定索引），序列化: dict -> msgpack -> zstd
  */
 
 import * as fs from 'fs';
@@ -119,6 +124,12 @@ async function getZstdSimple(): Promise<ZstdSimple> {
 /** UI Section 的固定 ID（旧版 Section） */
 const UI_SECTION_ID = 10;
 
+/** USLanguage Section 的固定 ID（旧版 Section） */
+const US_LANGUAGE_SECTION_ID = 49;
+
+/** ZHLanguage Section 的固定 ID（旧版 Section） */
+const ZH_LANGUAGE_SECTION_ID = 50;
+
 interface SectionHeader {
     index: number;
     packSize: number;
@@ -153,6 +164,8 @@ interface SaveResult {
 interface SaveOptions {
     updatePrefabs?: boolean;
     updateUI?: boolean;
+    updateUSLanguage?: boolean;
+    updateZHLanguage?: boolean;
     outputPath?: string;
 }
 
@@ -501,18 +514,41 @@ function getSectionIndexMap(): Map<string, number> {
 // ============================================================
 
 /**
- * 将字典数据打包为 Section 二进制格式
- * 打包流程：JSON -> msgpack -> zstd
+ * 将字典数据打包为 Section 二进制格式（新版 Section / 物编用）
+ * 打包流程：dict -> JSON string -> msgpack -> zstd
  * 使用 Zstd 单例避免重复初始化 WASM 导致 OOM
+ * 
+ * 注意：物编 Section 使用 SplitSection/DictSection，打包时先转 JSON 字符串再 msgpack
+ * Python 版本的流程是 embed.packb(json_str) -> zstd.compress()
+ * 参见 section_base.py 中 SplitSection._packs() 和 DictSection._packs()
  */
-async function packSectionData(data: Record<string, any>): Promise<Buffer> {
-    // 1. JSON 序列化（不带格式化，减少内存占用）
+async function packSectionDataNewStyle(data: Record<string, any>): Promise<Buffer> {
+    // 1. JSON 序列化
     const jsonStr = JSON.stringify(data);
 
-    // 2. msgpack 编码
+    // 2. msgpack 编码 JSON 字符串
     const packed = msgpack.encode(jsonStr);
 
     // 3. zstd 压缩（使用单例）
+    const simple = await getZstdSimple();
+    const compressed = simple.compress(packed, COMPRESS_LEVEL);
+    return Buffer.from(compressed);
+}
+
+/**
+ * 将字典数据打包为 Section 二进制格式（旧版 Section / 语言用）
+ * 打包流程：dict -> msgpack -> zstd
+ * 使用 Zstd 单例避免重复初始化 WASM 导致 OOM
+ * 
+ * 注意：旧版 Section (如 LanguageSection) 使用 NormalUploadSection，直接 msgpack 编码字典
+ * Python 版本的流程是 embed.packb(self.data) -> zstd.compress()
+ * 参见 MapSection.py 中 NormalUploadSection.calc_pack_size()
+ */
+async function packSectionDataOldStyle(data: Record<string, any>): Promise<Buffer> {
+    // 1. msgpack 编码（直接编码字典，不转 JSON 字符串）
+    const packed = msgpack.encode(data);
+
+    // 2. zstd 压缩（使用单例）
     const simple = await getZstdSimple();
     const compressed = simple.compress(packed, COMPRESS_LEVEL);
     return Buffer.from(compressed);
@@ -589,8 +625,8 @@ async function buildPrefabSectionsFromEditorTable(mapPath: string): Promise<Map<
         
         const itemCount = Object.keys(dataDict).length;
 
-        // 无论是否为空，都打包为二进制
-        const compressed = await packSectionData(dataDict);
+        // 无论是否为空，都打包为二进制（物编使用 NewStyle：dict -> JSON string -> msgpack -> zstd）
+        const compressed = await packSectionDataNewStyle(dataDict);
         result.set(sectionName, compressed);
         console.log(`[y3-save-gmp] 构建 ${sectionName}: ${itemCount} 个物编, ${compressed.length} bytes`);
         
@@ -911,12 +947,59 @@ function buildUIData(mapPath: string): Record<string, any> {
 /**
  * 从 ui/ 目录构建 UI Section 的二进制数据
  * 即使 UI 目录为空，也会打包空的 UI 数据结构
+ * UI Section 继承自 NormalUploadSection，使用 OldStyle 打包
  */
 async function buildUISection(mapPath: string): Promise<Buffer> {
     const uiData = buildUIData(mapPath);
-    const compressed = await packSectionData(uiData);
+    // UI Section 使用 OldStyle：dict -> msgpack -> zstd
+    const compressed = await packSectionDataOldStyle(uiData);
     console.log(`[y3-save-gmp] 构建 UI Section: ${compressed.length} bytes`);
     return compressed;
+}
+
+// ============================================================
+// 语言数据处理
+// ============================================================
+
+/**
+ * 从指定的语言 JSON 文件构建 Language Section 的二进制数据
+ * @param mapPath 地图根路径
+ * @param languageFile 语言文件名（如 uslanguage.json 或 zhlanguage.json）
+ * @returns 压缩后的二进制数据，如果文件不存在则返回 null
+ */
+async function buildLanguageSection(mapPath: string, languageFile: string): Promise<Buffer | null> {
+    const languagePath = path.join(mapPath, languageFile);
+
+    if (!fs.existsSync(languagePath)) {
+        console.log(`[y3-save-gmp] 语言文件不存在: ${languagePath}`);
+        return null;
+    }
+
+    try {
+        const content = fs.readFileSync(languagePath, 'utf-8');
+        const languageData = JSON.parse(content);
+        // Language Section 继承自 NormalUploadSection，使用 OldStyle：dict -> msgpack -> zstd
+        const compressed = await packSectionDataOldStyle(languageData);
+        console.log(`[y3-save-gmp] 构建 ${languageFile} Section: ${compressed.length} bytes`);
+        return compressed;
+    } catch (e) {
+        console.log(`[y3-save-gmp] 读取 ${languageFile} 失败: ${e}`);
+        return null;
+    }
+}
+
+/**
+ * 构建 USLanguage Section 的二进制数据
+ */
+async function buildUSLanguageSection(mapPath: string): Promise<Buffer | null> {
+    return buildLanguageSection(mapPath, 'uslanguage.json');
+}
+
+/**
+ * 构建 ZHLanguage Section 的二进制数据
+ */
+async function buildZHLanguageSection(mapPath: string): Promise<Buffer | null> {
+    return buildLanguageSection(mapPath, 'zhlanguage.json');
 }
 
 // ============================================================
@@ -924,12 +1007,14 @@ async function buildUISection(mapPath: string): Promise<Buffer> {
 // ============================================================
 
 /**
- * 重建 GMP 文件（支持物编和 UI）
+ * 重建 GMP 文件（支持物编、UI 和语言）
  */
 function rebuildGmpFull(
     originalParser: GmpParser,
     newPrefabSections: Map<string, Buffer> | null,
-    newUISection: Buffer | null
+    newUISection: Buffer | null,
+    newUSLanguageSection: Buffer | null = null,
+    newZHLanguageSection: Buffer | null = null
 ): Buffer {
     const builder = new GmpBuilder();
 
@@ -960,6 +1045,16 @@ function rebuildGmpFull(
     // UI Section 索引
     if (newUISection !== null) {
         replaceIndexes.add(UI_SECTION_ID);
+    }
+
+    // USLanguage Section 索引
+    if (newUSLanguageSection !== null) {
+        replaceIndexes.add(US_LANGUAGE_SECTION_ID);
+    }
+
+    // ZHLanguage Section 索引
+    if (newZHLanguageSection !== null) {
+        replaceIndexes.add(ZH_LANGUAGE_SECTION_ID);
     }
 
     // 添加原始的 Section（排除需要替换的）
@@ -998,6 +1093,18 @@ function rebuildGmpFull(
         console.log(`[rebuildGmpFull] 替换 UI Section (idx=${UI_SECTION_ID})`);
     }
 
+    // 添加新的 USLanguage Section
+    if (newUSLanguageSection !== null) {
+        builder.setSection(US_LANGUAGE_SECTION_ID, newUSLanguageSection, true, null);
+        console.log(`[rebuildGmpFull] 替换 USLanguage Section (idx=${US_LANGUAGE_SECTION_ID})`);
+    }
+
+    // 添加新的 ZHLanguage Section
+    if (newZHLanguageSection !== null) {
+        builder.setSection(ZH_LANGUAGE_SECTION_ID, newZHLanguageSection, true, null);
+        console.log(`[rebuildGmpFull] 替换 ZHLanguage Section (idx=${ZH_LANGUAGE_SECTION_ID})`);
+    }
+
     return builder.build();
 }
 
@@ -1008,6 +1115,8 @@ async function saveGmpWithNewData(
     mapPath: string,
     updatePrefabs: boolean = true,
     updateUI: boolean = true,
+    updateUSLanguage: boolean = true,
+    updateZHLanguage: boolean = true,
     outputPath?: string
 ): Promise<SaveResult> {
     // Step 1: 查找 .gmp 文件
@@ -1032,6 +1141,8 @@ async function saveGmpWithNewData(
     // Step 3: 构建新的 Section 数据（即使为空也打包空字典）
     let newPrefabSections: Map<string, Buffer> | null = null;
     let newUISection: Buffer | null = null;
+    let newUSLanguageSection: Buffer | null = null;
+    let newZHLanguageSection: Buffer | null = null;
 
     if (updatePrefabs) {
         newPrefabSections = await buildPrefabSectionsFromEditorTable(mapPath);
@@ -1043,16 +1154,30 @@ async function saveGmpWithNewData(
         console.log(`[y3-save-gmp] UI Section 大小: ${newUISection.length} bytes`);
     }
 
+    if (updateUSLanguage) {
+        newUSLanguageSection = await buildUSLanguageSection(mapPath);
+        if (newUSLanguageSection) {
+            console.log(`[y3-save-gmp] USLanguage Section 大小: ${newUSLanguageSection.length} bytes`);
+        }
+    }
+
+    if (updateZHLanguage) {
+        newZHLanguageSection = await buildZHLanguageSection(mapPath);
+        if (newZHLanguageSection) {
+            console.log(`[y3-save-gmp] ZHLanguage Section 大小: ${newZHLanguageSection.length} bytes`);
+        }
+    }
+
     // 检查是否有数据需要更新
-    if (!updatePrefabs && !updateUI) {
+    if (!updatePrefabs && !updateUI && !updateUSLanguage && !updateZHLanguage) {
         return {
             success: false,
-            message: '没有指定需要更新的数据类型（物编或 UI）',
+            message: '没有指定需要更新的数据类型（物编、UI 或语言）',
         };
     }
 
     // Step 4: 重建 GMP
-    const newGmpData = rebuildGmpFull(parser, newPrefabSections, newUISection);
+    const newGmpData = rebuildGmpFull(parser, newPrefabSections, newUISection, newUSLanguageSection, newZHLanguageSection);
 
     // Step 5: 保存
     const outputFile = outputPath || gmpFile;
@@ -1091,9 +1216,11 @@ async function saveGmpWithNewData(
 /**
  * Y3 GMP 保存钩子 - 主入口函数
  *
- * 当 AI 对以下目录进行增删改时，在所有操作完成后调用一次此函数：
- * - editor_table/ : 物编 JSON 文件
- * - ui/ : UI JSON 文件
+ * 当 AI 对以下目录/文件进行增删改时，在所有操作完成后调用一次此函数：
+ * - editor_table/    : 物编 JSON 文件
+ * - ui/              : UI JSON 文件
+ * - uslanguage.json  : 英文语言文件
+ * - zhlanguage.json  : 中文语言文件
  *
  * 核心原则：无论修改一个还是多个文件，只在最后调用一次 save()！
  *
@@ -1103,22 +1230,27 @@ async function saveGmpWithNewData(
  *
  * @example
  * // 修改物编后
- * const result = await save("maps/EntryMap", { updatePrefabs: true, updateUI: false });
+ * const result = await save("maps/EntryMap", { updatePrefabs: true, updateUI: false, updateUSLanguage: false, updateZHLanguage: false });
  *
  * // 修改 UI 后
- * const result = await save("maps/EntryMap", { updatePrefabs: false, updateUI: true });
+ * const result = await save("maps/EntryMap", { updatePrefabs: false, updateUI: true, updateUSLanguage: false, updateZHLanguage: false });
  *
- * // 同时修改物编和 UI 后
+ * // 修改语言文件后
+ * const result = await save("maps/EntryMap", { updatePrefabs: false, updateUI: false });
+ *
+ * // 同时修改物编、UI 和语言后
  * const result = await save("maps/EntryMap");
  */
 export async function save(mapPath: string, options: SaveOptions = {}): Promise<SaveResult> {
     const {
         updatePrefabs = true,
         updateUI = true,
+        updateUSLanguage = true,
+        updateZHLanguage = true,
         outputPath,
     } = options;
 
-    return saveGmpWithNewData(mapPath, updatePrefabs, updateUI, outputPath);
+    return saveGmpWithNewData(mapPath, updatePrefabs, updateUI, updateUSLanguage, updateZHLanguage, outputPath);
 }
 
 // 导出其他可能有用的函数和类
@@ -1127,12 +1259,17 @@ export {
     GmpBuilder,
     findGmpFile,
     getSectionIndexMap,
-    packSectionData,
+    packSectionDataNewStyle,
+    packSectionDataOldStyle,
     buildPrefabSectionsFromEditorTable,
     buildUISection,
+    buildUSLanguageSection,
+    buildZHLanguageSection,
     PREFAB_SECTIONS,
     SECTION_TO_FOLDER,
     UI_SECTION_ID,
+    US_LANGUAGE_SECTION_ID,
+    ZH_LANGUAGE_SECTION_ID,
 };
 
 export type {

@@ -30,7 +30,7 @@ export class GameSessionManager extends vscode.Disposable {
     /**
      * 启动游戏（非阻塞）
      * 立即返回启动状态，通过 get_game_status 轮询启动结果
-     * 调用 TypeScript 版本保存 GMP（物编和 UI）
+     * 调用 TypeScript 版本保存 GMP（物编、UI 和语言）
      */
     private async saveGmpBeforeLaunch(): Promise<void> {
         const mapUri = env.env.triggerMapUri ?? env.env.mapUri;
@@ -42,10 +42,12 @@ export class GameSessionManager extends vscode.Disposable {
         const mapPath = mapUri.fsPath;
 
         try {
-            tools.log.info(`[MCP] 正在保存 GMP (物编 + UI)...`);
+            tools.log.info(`[MCP] 正在保存 GMP (物编 + UI + 语言)...`);
             const result = await saveGmp(mapPath, {
                 updatePrefabs: true,
-                updateUI: true
+                updateUI: true,
+                updateUSLanguage: true,
+                updateZHLanguage: true
             });
             
             if (result.success) {
