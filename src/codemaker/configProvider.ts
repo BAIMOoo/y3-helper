@@ -9,5 +9,6 @@ export function getCodeMakerConfig() {
         apiKey: config.get<string>('CodeChatApiKey', ''),
         apiBaseUrl: config.get<string>('CodeChatApiBaseUrl', ''),
         model: config.get<string>('CodeChatModel', ''),
+        wireApi: config.get<string>('CodeChatWireApi', 'chat-completions'),
     };
 }

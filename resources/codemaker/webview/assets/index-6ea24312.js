@@ -17137,7 +17137,7 @@ ${io}`), le.message === Cn.AuthTokenIsExpired && window.parent.postMessage({
         }), [ve, pe] = await Promise.all([
           Su(Me),
           sT(Me)
-        ]), { sendMessages: He, containUserMessage: Qe, newTruncateStart: rt, previousTokens: Xt, fallbackToSlideWindow: le } = (pe === on.COMPRESSING && ve === on.COMPRESSED || pe === on.COMPRESSED && ve === on.COMPRESSING || pe === on.COMPRESSED && ve === on.COMPRESSED) && w.enable && w.visible && !O[S.model].isPrivate ? {
+        ]), { sendMessages: He, containUserMessage: Qe, newTruncateStart: rt, previousTokens: Xt, fallbackToSlideWindow: le } = (pe === on.COMPRESSING && ve === on.COMPRESSED || pe === on.COMPRESSED && ve === on.COMPRESSING || pe === on.COMPRESSED && ve === on.COMPRESSED) && w.enable && w.visible && !(O[S.model]||{}).isPrivate ? {
           sendMessages: oe,
           containUserMessage: true,
           newTruncateStart: -1,
@@ -17152,7 +17152,7 @@ ${io}`), le.message === Cn.AuthTokenIsExpired && window.parent.postMessage({
           model: S.model,
           codebaseModelMaxTokens: I
         });
-        He.length < oe.length && !O[S.model].isPrivate && w.enable && w.visible && ve !== on.COMPRESSING && ve !== on.FAILED && (console.log("\u68C0\u6D4B\u5230\u6D88\u606F\u622A\u65AD, \u89E6\u53D1\u5F3A\u5236\u538B\u7F29"), l.triggerCompression(Me)), le && (J = false);
+        He.length < oe.length && !(O[S.model]||{}).isPrivate && w.enable && w.visible && ve !== on.COMPRESSING && ve !== on.FAILED && (console.log("\u68C0\u6D4B\u5230\u6D88\u606F\u622A\u65AD, \u89E6\u53D1\u5F3A\u5236\u538B\u7F29"), l.triggerCompression(Me)), le && (J = false);
         const et = false, xt = M({
           isReAct: et,
           effectiveRules: F
@@ -17431,7 +17431,7 @@ Note:Don't repeat yourself`, At.temperature = 1) : [
                 }), ge.report({
                   event: re.CODE_CHAT_TOKEN_USED,
                   extends: {
-                    is_model_cache_enable: O[S.model].hasTokenCache,
+                    is_model_cache_enable: (O[S.model]||{}).hasTokenCache,
                     model: S.model,
                     fallback_to_slide_window: le,
                     cache_enable: J,
@@ -17621,7 +17621,7 @@ Note:Don't repeat yourself`, At.temperature = 1) : [
                   }, "*");
                 (!v || v !== S.model) && l.updateModel(S.model), ce.getState().generateAndUpdateSessionTopic(), l.syncHistory(), Js ? console.log("\u8BF7\u6C42\u671F\u95F4\u5DF2\u53D1\u751F\u538B\u7F29\uFF0C\u8DF3\u8FC7\u538B\u7F29\u68C0\u6D4B\u3002\u8BF7\u6C42\u524D\u6458\u8981\u6570:", ae, "\u5F53\u524D\u6458\u8981\u6570:", Br) : Su(Me).then((st) => {
                   l.analyzeContext(Me).then((Dt) => {
-                    Dt.shouldCompress && st !== on.COMPRESSING && !O[S.model].isPrivate && st !== on.FAILED && (console.log("\u6A21\u578B\u8FD4\u56DE\u540E\u89E6\u53D1\u81EA\u52A8\u538B\u7F29\uFF0Ctoken\u4F7F\u7528\u7387:", Dt.thresholds), l.triggerCompression(Me));
+                    Dt.shouldCompress && st !== on.COMPRESSING && !(O[S.model]||{}).isPrivate && st !== on.FAILED && (console.log("\u6A21\u578B\u8FD4\u56DE\u540E\u89E6\u53D1\u81EA\u52A8\u538B\u7F29\uFF0Ctoken\u4F7F\u7528\u7387:", Dt.thresholds), l.triggerCompression(Me));
                   });
                 });
               } else

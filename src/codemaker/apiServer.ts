@@ -42,6 +42,8 @@ export class CodeMakerApiServer {
             ...process.env as Record<string, string>,
             PORT: String(this._port),
             CHAT_HISTORY_PATH: this._globalStoragePath,
+            // 禁用 Node.js 严格 TLS 证书验证（解决 Windows 下 CRYPT_E_NO_REVOCATION_CHECK 问题）
+            NODE_TLS_REJECT_UNAUTHORIZED: '0',
         };
         if (config.apiKey) {
             env['AI_API_KEY'] = config.apiKey;
@@ -51,6 +53,9 @@ export class CodeMakerApiServer {
         }
         if (config.model) {
             env['AI_DEFAULT_MODEL'] = config.model;
+        }
+        if (config.wireApi) {
+            env['AI_WIRE_API'] = config.wireApi;
         }
 
         return new Promise<number>((resolve, reject) => {
