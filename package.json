@@ -500,7 +500,8 @@
         ]
     },
     "extensionDependencies": [
-        "sumneko.lua"
+        "sumneko.lua",
+        "sumneko.vscode-operator"
     ],
     "icon": "image/logo.png",
     "scripts": {

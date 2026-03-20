@@ -566,6 +566,96 @@ export class GameSessionManager extends vscode.Disposable {
     }
 
     /**
+     * 读取 Lua 文件的诊断问题
+     * 调用 sumneko.vscode-operator 扩展的 vscodeOperator_readProblems 功能
+     * @param params 参数对象
+     * @param params.pathGlob 可选的路径过滤模式（glob 格式），会与 **\/*.lua 组合使用
+     * @returns 诊断问题列表
+     */
+    async readProblemsLua(params?: { pathGlob?: string | string[] }): Promise<any> {
+        const maxItems = 100;
+        const minSeverity = 'warning';
+        
+        // 构建 pathGlob：始终包含 **/*.lua，如果用户指定了额外路径则组合使用
+        let finalPathGlob: string | string[];
+        const userPathGlob = params?.pathGlob;
+        
+        if (userPathGlob) {
+            // 用户指定了路径，组合 lua 过滤和用户路径
+            // 例如用户传入 "maps/EntryMap/**"，则组合为 ["maps/EntryMap/**/*.lua"]
+            if (Array.isArray(userPathGlob)) {
+                finalPathGlob = userPathGlob.map(p => {
+                    // 如果路径已经以 .lua 结尾，直接使用
+                    if (p.endsWith('.lua')) {
+                        return p;
+                    }
+                    // 否则添加 /**/*.lua 后缀
+                    return p.endsWith('/') ? `${p}**/*.lua` : `${p}/**/*.lua`;
+                });
+            } else {
+                if (userPathGlob.endsWith('.lua')) {
+                    finalPathGlob = userPathGlob;
+                } else {
+                    finalPathGlob = userPathGlob.endsWith('/') 
+                        ? `${userPathGlob}**/*.lua` 
+                        : `${userPathGlob}/**/*.lua`;
+                }
+            }
+        } else {
+            finalPathGlob = '**/*.lua';
+        }
+
+        try {
+            const result = await vscode.lm.invokeTool(
+                'vscodeOperator_readProblems',
+                {
+                    toolInvocationToken: undefined,
+                    input: {
+                        maxItems,
+                        minSeverity,
+                        pathGlob: finalPathGlob
+                    }
+                }
+            );
+
+            // 解析返回结果
+            let textContent = '';
+            for (const part of result.content) {
+                if (part instanceof vscode.LanguageModelTextPart) {
+                    textContent += part.value;
+                }
+            }
+
+            if (textContent) {
+                const parsed = JSON.parse(textContent);
+                return {
+                    success: true,
+                    ...parsed
+                };
+            }
+
+            return {
+                success: true,
+                filter: {
+                    minSeverity,
+                    pathGlob: finalPathGlob
+                },
+                total: 0,
+                returned: 0,
+                items: []
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            tools.log.error(`[MCP] readProblemsLua 调用失败: ${message}`);
+            return {
+                success: false,
+                error: message,
+                message: '调用 vscodeOperator_readProblems 失败，请确保已安装 sumneko.vscode-operator 扩展'
+            };
+        }
+    }
+
+    /**
      * 清理资源
      */
     dispose(): void {

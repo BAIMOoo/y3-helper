@@ -300,7 +300,23 @@ export class TCPServer extends vscode.Disposable {
                         { name: 'quick_restart', description: '快速重启游戏', inputSchema: { type: 'object', properties: {} } },
                         { name: 'stop_game', description: '停止游戏', inputSchema: { type: 'object', properties: {} } },
                         { name: 'get_logs', description: '获取游戏日志', inputSchema: { type: 'object', properties: { limit: { type: 'number' } } } },
-                        { name: 'capture_screenshot', description: '截图', inputSchema: { type: 'object', properties: {} } }
+                        { name: 'capture_screenshot', description: '截图', inputSchema: { type: 'object', properties: {} } },
+                        { 
+                            name: 'read_problems_lua', 
+                            description: '检查 Lua 文件', 
+                            inputSchema: { 
+                                type: 'object', 
+                                properties: { 
+                                    pathGlob: { 
+                                        oneOf: [
+                                            { type: 'string', description: '单个路径过滤模式，如 "maps/EntryMap" 或 "src/main.lua"' },
+                                            { type: 'array', items: { type: 'string' }, description: '多个路径过滤模式列表' }
+                                        ],
+                                        description: '路径过滤模式（glob 格式），会自动添加 **/*.lua 后缀。默认检查所有 Lua 文件'
+                                    }
+                                }
+                            } 
+                        }
                     ]
                 }
             };
@@ -334,6 +350,9 @@ export class TCPServer extends vscode.Disposable {
                         break;
                     case 'capture_screenshot':
                         result = await this.sessionManager.captureScreenshot();
+                        break;
+                    case 'read_problems_lua':
+                        result = await this.sessionManager.readProblemsLua(toolArgs);
                         break;
                     default:
                         return {
