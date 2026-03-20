@@ -1,7 +1,8 @@
-单号,change-id,归档日期,代码行数,SVN版本,备注
-98274,docs-vscode-plugin-learning-98274,2026-03-13,0,-,文档学习任务，不涉及代码修改。产出：开发指南文档+Skill
-98336,feat-ui-framework-98336,2026-03-13,1748,-,补充UI框架。新增1748行(全部AI辅助)。含UI模板文件+uiFramework.ts核心模块+命令注册+菜单集成
-
-98280,vscode-save-gmp,2026-03-17,1144,-,GMP保存功能。从Python迁移到TypeScript实现。含y3SaveGmp.ts核心模块+MCP工具集成+游戏启动自动保存
-98275,feat-codemaker-integration-with-y3helper-98275,2026-03-18,1424,-,CodeMaker AI助手集成。新增1424行(全部AI辅助)。含WebviewProvider+ApiServer+ConfigProvider+消息桥+API Server路由+聊天历史持久化+webview构建产物
-98275,feat-codemaker-fixed-model-setting,2026-03-19,~50,-,CodeMaker固定模型设置。在Settings中填写模型名后锁定UI模型选择。修改Extension端+前端源码(extension.ts/App.tsx/chat-config.ts/ChatModelSelector.tsx)+重新构建webview
+单号,归档时间,AI代码行数,代码行数,提交人,SVN版本列表,提交次数,变更名称,备注
+98274,2026/3/13,0,0,王浩辰,cba9d62,1,docs-vscode-plugin-learning-98274,学习VsCode插件编码流程（文档类）
+98336,2026/3/13,1748,1748,刘冰,832ae44;55ef730,2,feat-ui-framework-98336,UI框架及主控界面优化
+98276,2026/3/13,10,10,王一鑫,dbe1fc2;d6a0dce,2,project-level-workspace-global-script-98276,工作目录换成项目级别增加global script路径选择
+98275,2026/3/16,0,0,王浩辰,5aeb133,1,phrase-1-integrate-real-ai-api-98275,CodeMaker集成第一阶段使用真实API跑通（纯spec）
+98280,2026/3/17,1144,1219,王一鑫,c3b901a,1,vscode-save-gmp-98280,VsCode保存GMP支持直接修改的UI能直接运行
+98275,2026/3/18,1424,1667,王浩辰,26a2d10;c713103;9c69383,3,feat-codemaker-integration-with-y3helper-98275,CodeMaker集成Y3Helper含WebviewProvider+ApiServer+消息桥+聊天历史持久化
+98275,2026/3/19,50,50,王浩辰,0037012,1,feat-codemaker-fixed-model-setting-98275,修复模型设置配置
