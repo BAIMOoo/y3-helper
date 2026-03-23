@@ -334,7 +334,7 @@ export class TCPServer extends vscode.Disposable {
                         },
                         {
                             name: 'get_ui_canvas',
-                            description: '获取当前地图的 UI 画板结构，以树形文本返回画板、场景UI、元件中所有控件的层级关系（name、控件类型、uid）。无需游戏运行，只需地图已加载。',
+                            description: '获取当前地图的 UI 画板结构，以树形文本返回控件的层级关系（name、控件类型、uid）。无需游戏运行，只需地图已加载。支持 nodePath 路径过滤（画板格式："画板名.节点名.子节点名"，场景UI/元件格式："节点名.子节点名"）和 depth 深度控制。',
                             inputSchema: {
                                 type: 'object',
                                 properties: {
@@ -394,7 +394,11 @@ export class TCPServer extends vscode.Disposable {
                     case 'get_ui_canvas': {
                         const category: string = toolArgs.category ?? 'all';
                         const nodePath: string | undefined = toolArgs.nodePath;
-                        const depth: number | undefined = toolArgs.depth !== undefined ? Number(toolArgs.depth) : undefined;
+                        let depth: number | undefined = undefined;
+                        if (toolArgs.depth !== undefined) {
+                            const rawDepth = Number(toolArgs.depth);
+                            depth = isNaN(rawDepth) ? undefined : Math.max(0, Math.floor(rawDepth));
+                        }
 
                         if (!envImport.env.currentMap) {
                             result = {
@@ -631,7 +635,7 @@ export class TCPServer extends vscode.Disposable {
     /**
      * 按路径数组递归查找 UI 节点
      * @param nodes 当前层级的节点列表
-     * @param pathSegments 剩余路径段
+     * @param pathSegments 剩余路径段（外部调用时保证长度 >= 1；此处防御内部递归的边界情况）
      */
     private findNodeByPath(nodes: UINode[], pathSegments: string[]): UINode | undefined {
         if (pathSegments.length === 0) return undefined;
