@@ -3,6 +3,7 @@
 98336,2026/3/13,1748,1748,刘冰,832ae44;55ef730,2,feat-ui-framework-98336,UI框架及主控界面优化
 98276,2026/3/13,10,10,王一鑫,dbe1fc2;d6a0dce,2,project-level-workspace-global-script-98276,工作目录换成项目级别增加global script路径选择
 98275,2026/3/16,0,0,王浩辰,5aeb133,1,phrase-1-integrate-real-ai-api-98275,CodeMaker集成第一阶段使用真实API跑通（纯spec）
-98280,2026/3/17,1144,1219,王一鑫,c3b901a,1,vscode-save-gmp-98280,VsCode保存GMP支持直接修改的UI能直接运行
-98275,2026/3/18,1424,1667,王浩辰,26a2d10;c713103;9c69383,3,feat-codemaker-integration-with-y3helper-98275,CodeMaker集成Y3Helper含WebviewProvider+ApiServer+消息桥+聊天历史持久化
+98280,2026/3/17,1219,1219,王一鑫,c3b901a,1,vscode-save-gmp-98280,VsCode保存GMP支持直接修改的UI能直接运行
+98275,2026/3/18,1667,1667,王浩辰,26a2d10;c713103;9c69383,3,feat-codemaker-integration-with-y3helper-98275,CodeMaker集成Y3Helper含WebviewProvider+ApiServer+消息桥+聊天历史持久化
 98275,2026/3/19,50,50,王浩辰,0037012,1,feat-codemaker-fixed-model-setting-98275,修复模型设置配置
+98275,2026/3/23,1600,1600,王浩辰,,1,fix-codemaker-webview-message-handlers,修复CodeMaker集成WebView消息处理：@附加文件+TOOL_CALL+聊天无响应+Rules/MCP配置+API端口冲突+60+消息类型移植

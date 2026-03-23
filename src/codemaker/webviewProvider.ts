@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
+import * as fs from 'fs';
+import * as path from 'path';
 import { getCodeMakerConfig } from './configProvider';
+import { handleExtendedMessage } from './messageHandlers';
 
 /**
  * CodeMaker WebView 视图提供者
@@ -103,7 +106,13 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
     //  消息处理 —— 对应源码版 handleMessage
     // ─────────────────────────────────────────────
 
-    private _handleMessage(message: any, webview: vscode.Webview) {
+    private async _handleMessage(message: any, webview: vscode.Webview) {
+        // ── 所有消息都日志输出，便于排查 ──
+        if (!['CONSOLE_LOG', 'CONSOLE_WARN', 'CONSOLE_ERROR', 'PRINT_LOG',
+              'REPORT_CONSOLE_LOG', 'REPORT_CONSOLE_WARN', 'REPORT_CONSOLE_ERROR'].includes(message.type)) {
+            console.log(`[CodeMaker MSG] type=${message.type}`);
+        }
+
         switch (message.type) {
             case 'GET_INIT_DATA': {
                 this._sendInitData(webview);
@@ -135,9 +144,43 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
                 });
                 break;
             }
+            case 'GET_WORKSPACE_FILES': {
+                const keyword: string = message.data?.keyword ?? '';
+                const max: number = message.data?.max ?? 50;
+                this._searchWorkspaceFiles(keyword, max).then(files => {
+                    this.sendMessage({
+                        type: 'WORKSPACE_FILES',
+                        data: files,
+                    });
+                });
+                break;
+            }
+            case 'SEARCH_WORKSPACE_PATH': {
+                const keyword: string = message.data?.keyword ?? '';
+                const max: number = message.data?.max ?? 10;
+                const searchType: string | undefined = message.data?.type; // "file" | "folder" | undefined
+                this._searchWorkspacePaths(keyword, max, searchType).then(files => {
+                    this.sendMessage({
+                        type: 'WORKSPACE_FILES',
+                        data: files,
+                    });
+                });
+                break;
+            }
+            case 'TOOL_CALL': {
+                this._handleToolCall(message.data);
+                break;
+            }
             default: {
-                // 其他消息暂不处理，但可以扩展
-                // console.log('[CodeMaker] Unhandled message:', message.type);
+                // 尝试使用扩展消息处理器（覆盖源码版 96 个 case 中的大部分）
+                try {
+                    const handled = await handleExtendedMessage(message, webview, this);
+                    if (!handled) {
+                        console.log('[CodeMaker] Unhandled message:', message.type);
+                    }
+                } catch (err) {
+                    console.error('[CodeMaker] Error handling message:', message.type, err);
+                }
                 break;
             }
         }
@@ -249,6 +292,439 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
             return env.SHELL || '/bin/zsh';
         }
         return env.SHELL || '/bin/bash';
+    }
+
+    // ─────────────────────────────────────────────
+    //  TOOL_CALL 处理 —— AI 模型调用的工具（read_file、list_files 等）
+    // ─────────────────────────────────────────────
+
+    /**
+     * 处理前端发来的 TOOL_CALL 消息
+     * AI 模型通过 function_call 调用 read_file / list_files 等工具时，
+     * 前端会发送 TOOL_CALL，Extension 执行后返回 TOOL_CALL_RESULT
+     */
+    private async _handleToolCall(data: any) {
+        const { tool_name, tool_params, tool_id } = data || {};
+        if (!tool_name || !tool_id) {
+            return;
+        }
+
+        console.log(`[CodeMaker] TOOL_CALL: ${tool_name}, id: ${tool_id}`);
+
+        try {
+            let result: any;
+            switch (tool_name) {
+                case 'read_file':
+                    result = await this._toolReadFile(tool_params);
+                    break;
+                case 'list_files_top_level':
+                    result = await this._toolListFiles(tool_params, false);
+                    break;
+                case 'list_files_recursive':
+                    result = await this._toolListFiles(tool_params, true);
+                    break;
+                case 'view_source_code_definitions_top_level':
+                    result = await this._toolViewDefinitions(tool_params);
+                    break;
+                case 'grep_search':
+                    result = await this._toolGrepSearch(tool_params);
+                    break;
+                default:
+                    result = {
+                        content: `Tool "${tool_name}" is not supported in Y3Helper integration.`,
+                        isError: true,
+                    };
+                    break;
+            }
+
+            this.sendMessage({
+                type: 'TOOL_CALL_RESULT',
+                data: {
+                    tool_result: result,
+                    tool_id: tool_id,
+                    tool_name: tool_name,
+                    extra: {},
+                },
+            });
+        } catch (err: any) {
+            console.error(`[CodeMaker] TOOL_CALL error (${tool_name}):`, err);
+            this.sendMessage({
+                type: 'TOOL_CALL_RESULT',
+                data: {
+                    tool_result: {
+                        content: `Error executing ${tool_name}: ${err.message || err}`,
+                        isError: true,
+                    },
+                    tool_id: tool_id,
+                    tool_name: tool_name,
+                    extra: {},
+                },
+            });
+        }
+    }
+
+    /**
+     * read_file 工具：读取指定文件内容
+     * tool_params: { path: string, offset?: number, limit?: number }
+     */
+    private async _toolReadFile(params: any): Promise<any> {
+        let filePath: string = params?.path || params?.file_path || '';
+        if (!filePath) {
+            return { content: 'Error: No file path provided.', isError: true };
+        }
+
+        // 如果是相对路径，解析为绝对路径
+        if (!path.isAbsolute(filePath)) {
+            const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (workspace) {
+                filePath = path.join(workspace, filePath);
+            }
+        }
+
+        try {
+            const stat = await fs.promises.stat(filePath);
+            if (stat.isDirectory()) {
+                return { content: `Error: "${filePath}" is a directory, not a file.`, path: filePath, isError: true };
+            }
+
+            const buffer = await fs.promises.readFile(filePath, 'utf-8');
+            let lines = buffer.split('\n');
+
+            const offset = Math.max(0, (params?.offset || 1) - 1);
+            const limit = params?.limit || 500;
+            lines = lines.slice(offset, offset + limit);
+
+            // 添加行号（cat -n 格式）
+            const numbered = lines.map((line, i) => {
+                const lineNum = offset + i + 1;
+                return `${String(lineNum).padStart(6, ' ')}\t${line}`;
+            }).join('\n');
+
+            return {
+                content: numbered,
+                path: filePath,
+                isError: false,
+            };
+        } catch (err: any) {
+            return {
+                content: `Error reading file "${filePath}": ${err.message}`,
+                path: filePath,
+                isError: true,
+            };
+        }
+    }
+
+    /**
+     * list_files_top_level / list_files_recursive 工具
+     * tool_params: { path: string }
+     */
+    private async _toolListFiles(params: any, recursive: boolean): Promise<any> {
+        let dirPath: string = params?.path || '.';
+        const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+        if (!path.isAbsolute(dirPath)) {
+            if (workspace) {
+                dirPath = path.join(workspace, dirPath);
+            }
+        }
+
+        try {
+            const stat = await fs.promises.stat(dirPath);
+            if (!stat.isDirectory()) {
+                return { content: `Error: "${dirPath}" is not a directory.`, isError: true };
+            }
+
+            const entries = await this._listDir(dirPath, recursive, workspace || dirPath, 0, 5);
+            return {
+                content: entries.join('\n'),
+                isError: false,
+            };
+        } catch (err: any) {
+            return {
+                content: `Error listing directory "${dirPath}": ${err.message}`,
+                isError: true,
+            };
+        }
+    }
+
+    private async _listDir(dirPath: string, recursive: boolean, basePath: string, depth: number, maxDepth: number): Promise<string[]> {
+        const results: string[] = [];
+        try {
+            const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+            for (const entry of entries) {
+                // 跳过常见无关目录
+                if (['.git', 'node_modules', '.DS_Store', '__pycache__'].includes(entry.name)) {
+                    continue;
+                }
+                const fullPath = path.join(dirPath, entry.name);
+                const relativePath = path.relative(basePath, fullPath).replace(/\\/g, '/');
+
+                if (entry.isDirectory()) {
+                    results.push(relativePath + '/');
+                    if (recursive && depth < maxDepth) {
+                        const subEntries = await this._listDir(fullPath, true, basePath, depth + 1, maxDepth);
+                        results.push(...subEntries);
+                    }
+                } else {
+                    results.push(relativePath);
+                }
+
+                if (results.length > 500) {
+                    results.push('... (truncated, too many entries)');
+                    break;
+                }
+            }
+        } catch (err) {
+            // 忽略权限错误等
+        }
+        return results;
+    }
+
+    /**
+     * view_source_code_definitions_top_level 工具（简化版：返回文件列表）
+     */
+    private async _toolViewDefinitions(params: any): Promise<any> {
+        // 简化实现：列出目录下的源码文件
+        const result = await this._toolListFiles(params, false);
+        return result;
+    }
+
+    /**
+     * grep_search 工具：在工作区搜索匹配的文本
+     * tool_params: { regex: string, path?: string, file_pattern?: string }
+     */
+    private async _toolGrepSearch(params: any): Promise<any> {
+        const regex = params?.regex || params?.pattern;
+        if (!regex) {
+            return { content: 'Error: No search pattern provided.', isError: true };
+        }
+
+        let searchPath = params?.path || '.';
+        const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!path.isAbsolute(searchPath) && workspace) {
+            searchPath = path.join(workspace, searchPath);
+        }
+
+        try {
+            const results: string[] = [];
+            const re = new RegExp(regex, params?.case_sensitive ? '' : 'i');
+            await this._grepDir(searchPath, re, params?.file_pattern, results, 50);
+
+            if (results.length === 0) {
+                return { content: 'No matches found.', isError: false };
+            }
+            return { content: results.join('\n'), isError: false };
+        } catch (err: any) {
+            return { content: `Error during search: ${err.message}`, isError: true };
+        }
+    }
+
+    private async _grepDir(dirPath: string, regex: RegExp, filePattern: string | undefined, results: string[], maxResults: number): Promise<void> {
+        if (results.length >= maxResults) { return; }
+        try {
+            const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+            for (const entry of entries) {
+                if (results.length >= maxResults) { return; }
+                if (['.git', 'node_modules', 'dist', 'out', '__pycache__'].includes(entry.name)) {
+                    continue;
+                }
+                const fullPath = path.join(dirPath, entry.name);
+                if (entry.isDirectory()) {
+                    await this._grepDir(fullPath, regex, filePattern, results, maxResults);
+                } else {
+                    // 文件模式过滤
+                    if (filePattern) {
+                        const ext = filePattern.replace('*', '');
+                        if (!entry.name.endsWith(ext)) { continue; }
+                    }
+                    try {
+                        const content = await fs.promises.readFile(fullPath, 'utf-8');
+                        const lines = content.split('\n');
+                        for (let i = 0; i < lines.length; i++) {
+                            if (regex.test(lines[i])) {
+                                results.push(`${fullPath}:${i + 1}: ${lines[i].trimEnd()}`);
+                                if (results.length >= maxResults) { return; }
+                            }
+                        }
+                    } catch {
+                        // 跳过无法读取的文件（二进制等）
+                    }
+                }
+            }
+        } catch {
+            // 忽略权限错误
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    //  工作区文件/目录搜索
+    // ─────────────────────────────────────────────
+
+    /**
+     * 搜索工作区文件（用于 GET_WORKSPACE_FILES）
+     * 返回匹配关键字的文件列表，当前打开的文件标记 isActive
+     */
+    private async _searchWorkspaceFiles(keyword: string, max: number): Promise<any[]> {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            return [];
+        }
+
+        const activeFilePath = vscode.window.activeTextEditor?.document.fileName;
+        const openFilePaths = new Set(
+            vscode.workspace.textDocuments
+                .filter(doc => !doc.isUntitled)
+                .map(doc => doc.fileName)
+        );
+
+        // 使用 glob 模式搜索文件
+        const pattern = keyword
+            ? `**/*${keyword}*`
+            : '**/*';
+
+        const excludePattern = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.DS_Store}';
+
+        try {
+            const uris = await vscode.workspace.findFiles(pattern, excludePattern, max * 3);
+
+            const results: any[] = [];
+            for (const uri of uris) {
+                const relativePath = vscode.workspace.asRelativePath(uri, false);
+                const fileName = path.basename(uri.fsPath);
+
+                // 如果有关键字，进行更精确的过滤
+                if (keyword && !relativePath.toLowerCase().includes(keyword.toLowerCase())) {
+                    continue;
+                }
+
+                const isActive = uri.fsPath === activeFilePath || openFilePaths.has(uri.fsPath);
+
+                results.push({
+                    path: relativePath.replace(/\\/g, '/'),
+                    fileName: fileName,
+                    isActive: isActive,
+                });
+
+                if (results.length >= max) {
+                    break;
+                }
+            }
+
+            // 将活动文件排在前面
+            results.sort((a, b) => {
+                if (a.isActive && !b.isActive) { return -1; }
+                if (!a.isActive && b.isActive) { return 1; }
+                return 0;
+            });
+
+            return results;
+        } catch (e) {
+            console.error('[CodeMaker] Error searching workspace files:', e);
+            return [];
+        }
+    }
+
+    /**
+     * 搜索工作区路径（用于 SEARCH_WORKSPACE_PATH）
+     * 支持按 file / folder 类型过滤
+     * 目录路径以 "/" 结尾，文件路径不带结尾斜杠
+     */
+    private async _searchWorkspacePaths(keyword: string, max: number, type?: string): Promise<any[]> {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            return [];
+        }
+
+        const activeFilePath = vscode.window.activeTextEditor?.document.fileName;
+        const results: any[] = [];
+
+        if (type === 'folder' || !type) {
+            // 搜索目录：通过搜索目录下的任意文件来发现目录
+            const dirPattern = keyword
+                ? `**/*${keyword}*/**`
+                : '**/*';
+            const excludePattern = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.DS_Store}';
+
+            try {
+                const uris = await vscode.workspace.findFiles(dirPattern, excludePattern, 500);
+                const dirSet = new Set<string>();
+
+                for (const uri of uris) {
+                    const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
+                    // 收集所有中间目录
+                    const parts = relativePath.split('/');
+                    let dirPath = '';
+                    for (let i = 0; i < parts.length - 1; i++) {
+                        dirPath = dirPath ? `${dirPath}/${parts[i]}` : parts[i];
+                        if (keyword) {
+                            if (dirPath.toLowerCase().includes(keyword.toLowerCase())) {
+                                dirSet.add(dirPath);
+                            }
+                        } else {
+                            dirSet.add(dirPath);
+                        }
+                    }
+                }
+
+                for (const dir of dirSet) {
+                    const dirName = path.basename(dir);
+                    results.push({
+                        path: dir + '/',  // 目录以 "/" 结尾
+                        fileName: dirName,
+                        isActive: false,
+                    });
+                    if (type === 'folder' && results.length >= max) {
+                        break;
+                    }
+                }
+            } catch (e) {
+                console.error('[CodeMaker] Error searching workspace folders:', e);
+            }
+        }
+
+        if (type === 'file' || !type) {
+            // 搜索文件
+            const filePattern = keyword
+                ? `**/*${keyword}*`
+                : '**/*';
+            const excludePattern = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.DS_Store}';
+
+            try {
+                const uris = await vscode.workspace.findFiles(filePattern, excludePattern, max * 3);
+
+                for (const uri of uris) {
+                    const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
+                    const fileName = path.basename(uri.fsPath);
+
+                    if (keyword && !relativePath.toLowerCase().includes(keyword.toLowerCase())) {
+                        continue;
+                    }
+
+                    const isActive = uri.fsPath === activeFilePath;
+
+                    results.push({
+                        path: relativePath,
+                        fileName: fileName,
+                        isActive: isActive,
+                    });
+
+                    if (results.length >= max) {
+                        break;
+                    }
+                }
+            } catch (e) {
+                console.error('[CodeMaker] Error searching workspace files:', e);
+            }
+        }
+
+        // 活动文件排在前面，截断到 max
+        results.sort((a, b) => {
+            if (a.isActive && !b.isActive) { return -1; }
+            if (!a.isActive && b.isActive) { return 1; }
+            return 0;
+        });
+
+        return results.slice(0, max);
     }
 
     // ─────────────────────────────────────────────

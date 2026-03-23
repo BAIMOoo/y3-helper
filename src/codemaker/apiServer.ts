@@ -58,38 +58,91 @@ export class CodeMakerApiServer {
             env['AI_WIRE_API'] = config.wireApi;
         }
 
+        return this._tryStartOnPort(serverEntryPath, env, this._port, MAX_PORT_ATTEMPTS);
+    }
+
+    /**
+     * 尝试在指定端口启动 API Server，如果端口被占用则自动递增重试
+     */
+    private _tryStartOnPort(serverEntryPath: string, env: Record<string, string>, port: number, remainingAttempts: number): Promise<number> {
         return new Promise<number>((resolve, reject) => {
+            if (remainingAttempts <= 0) {
+                reject(new Error(`无法找到可用端口（已尝试 ${DEFAULT_PORT}~${DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1}）`));
+                return;
+            }
+
+            env['PORT'] = String(port);
+            let settled = false;
+
             try {
-                this._process = fork(serverEntryPath, [], {
-                    env,
+                const child = fork(serverEntryPath, [], {
+                    env: { ...env },
                     stdio: 'pipe',
                     silent: true,
                 });
 
-                this._process.stdout?.on('data', (data: Buffer) => {
+                const startupTimeout = setTimeout(() => {
+                    if (!settled) {
+                        settled = true;
+                        // 超时 3 秒还没出错，认为启动成功
+                        this._process = child;
+                        this._port = port;
+                        resolve(port);
+                    }
+                }, 3000);
+
+                child.stdout?.on('data', (data: Buffer) => {
                     console.log(`[CodeMaker API] ${data.toString().trim()}`);
                 });
 
-                this._process.stderr?.on('data', (data: Buffer) => {
-                    console.error(`[CodeMaker API Error] ${data.toString().trim()}`);
+                child.stderr?.on('data', (data: Buffer) => {
+                    const msg = data.toString().trim();
+                    console.error(`[CodeMaker API Error] ${msg}`);
+
+                    // 检测端口冲突错误
+                    if (!settled && msg.includes('EADDRINUSE')) {
+                        settled = true;
+                        clearTimeout(startupTimeout);
+                        child.kill();
+                        console.log(`[CodeMaker API] Port ${port} is in use, trying ${port + 1}...`);
+                        // 递归尝试下一个端口
+                        this._tryStartOnPort(serverEntryPath, env, port + 1, remainingAttempts - 1)
+                            .then(resolve)
+                            .catch(reject);
+                    }
                 });
 
-                this._process.on('error', (err) => {
+                child.on('error', (err) => {
                     console.error('[CodeMaker API] Process error:', err);
-                    this._process = undefined;
+                    if (!settled) {
+                        settled = true;
+                        clearTimeout(startupTimeout);
+                        reject(err);
+                    }
                 });
 
-                this._process.on('exit', (code) => {
+                child.on('exit', (code) => {
                     console.log(`[CodeMaker API] Process exited with code ${code}`);
-                    this._process = undefined;
+                    if (!settled) {
+                        settled = true;
+                        clearTimeout(startupTimeout);
+                        // 非零退出码，尝试下一个端口
+                        if (code !== 0) {
+                            console.log(`[CodeMaker API] Port ${port} failed (exit code ${code}), trying ${port + 1}...`);
+                            this._tryStartOnPort(serverEntryPath, env, port + 1, remainingAttempts - 1)
+                                .then(resolve)
+                                .catch(reject);
+                        }
+                    } else {
+                        // 已启动成功后退出，清理状态
+                        this._process = undefined;
+                    }
                 });
-
-                // 给服务器一点启动时间
-                setTimeout(() => {
-                    resolve(this._port);
-                }, 1000);
             } catch (err) {
-                reject(err);
+                if (!settled) {
+                    settled = true;
+                    reject(err);
+                }
             }
         });
     }
