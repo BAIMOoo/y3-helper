@@ -6,7 +6,8 @@ import * as tools from '../tools';
 import { getTCPConfig, TCPRequest, TCPResponse } from './types';
 import { GameSessionManager } from './gameSessionManager';
 import { define } from '../customDefine';
-import { env as envModule } from '../env';
+import type { UINode } from '../customDefine/ui';
+import * as envImport from '../env';
 
 // MCP Streamable HTTP 端口
 const MCP_HTTP_PORT = 8766;
@@ -31,6 +32,18 @@ export class TCPServer extends vscode.Disposable {
     private sessionManager: GameSessionManager;
     private connections: Set<net.Socket> = new Set();
     private mcpSessions: Map<string, MCPSession> = new Map();
+
+    private readonly UI_TYPE_NAMES: Record<number, string> = {
+        1: 'Button',
+        3: 'TextLabel',
+        4: 'Image',
+        5: 'Progress',
+        7: 'Layout',
+        10: 'ScrollView',
+        18: 'Buff',
+        27: 'Chat_Box',
+        38: 'Sequence_Animation',
+    };
 
     constructor() {
         super(() => this.dispose());
@@ -373,7 +386,7 @@ export class TCPServer extends vscode.Disposable {
                     case 'get_ui_canvas': {
                         const category: string = toolArgs.category ?? 'all';
 
-                        if (!envModule.currentMap) {
+                        if (!envImport.env.currentMap) {
                             result = {
                                 success: false,
                                 error: '当前没有已加载的地图，请先在 VSCode 中打开 Y3 地图项目'
@@ -382,27 +395,31 @@ export class TCPServer extends vscode.Disposable {
                         }
 
                         try {
-                            const uiPackage = await define(envModule.currentMap).界面.getUIPackage();
+                            const uiPackage = await define(envImport.env.currentMap).界面.getUIPackage();
                             const lines: string[] = [];
 
-                            const formatSection = (title: string, nodes: any[]) => {
+                            const formatSection = (title: string, nodes: UINode[], isCanvas: boolean = false) => {
                                 if (nodes.length === 0) {
-                                    lines.push(`${title}: (空)`);
+                                    if (isCanvas) {
+                                        lines.push(`${title}: (无)`);
+                                    } else {
+                                        lines.push(`${title}: (空)`);
+                                    }
                                     return;
                                 }
-                                if (title === '画板') {
+                                if (isCanvas) {
                                     // 画板下每个 node 是独立的画布，单独列出
                                     for (const node of nodes) {
                                         lines.push(`画板: ${node.name}`);
-                                        const childs: any[] = node.childs ?? [];
-                                        childs.forEach((child: any, i: number) => {
+                                        const childs: UINode[] = node.childs ?? [];
+                                        childs.forEach((child: UINode, i: number) => {
                                             lines.push(this.formatNodeTree(child, '', i === childs.length - 1));
                                         });
                                         lines.push('');
                                     }
                                 } else {
                                     lines.push(`${title}:`);
-                                    nodes.forEach((node: any, i: number) => {
+                                    nodes.forEach((node: UINode, i: number) => {
                                         lines.push(this.formatNodeTree(node, '', i === nodes.length - 1));
                                     });
                                     lines.push('');
@@ -410,7 +427,7 @@ export class TCPServer extends vscode.Disposable {
                             };
 
                             if (category === 'all' || category === '画板') {
-                                formatSection('画板', uiPackage.画板);
+                                formatSection('画板', uiPackage.画板, true);
                             }
                             if (category === 'all' || category === '场景UI') {
                                 formatSection('场景UI', uiPackage.场景UI);
@@ -563,32 +580,20 @@ export class TCPServer extends vscode.Disposable {
         }
     }
 
-    private readonly UI_TYPE_NAMES: Record<number, string> = {
-        1: 'Button',
-        3: 'TextLabel',
-        4: 'Image',
-        5: 'Progress',
-        7: 'Layout',
-        10: 'ScrollView',
-        18: 'Buff',
-        27: 'Chat_Box',
-        38: 'Sequence_Animation',
-    };
-
     /**
      * 递归将 UI Node 树格式化为类文件树的文本
      * @param node UI 节点
      * @param prefix 当前行前缀（用于绘制树形线条）
      * @param isLast 是否是父节点的最后一个子节点
      */
-    private formatNodeTree(node: any, prefix: string = '', isLast: boolean = true): string {
+    private formatNodeTree(node: UINode, prefix: string = '', isLast: boolean = true): string {
         const connector = isLast ? '└── ' : '├── ';
         const typeName = this.UI_TYPE_NAMES[node.type] ?? `type_${node.type}`;
         const line = `${prefix}${connector}${node.name} [${typeName}] (uid: ${node.uid})`;
 
         const childPrefix = prefix + (isLast ? '    ' : '│   ');
-        const childs: any[] = node.childs ?? [];
-        const childLines = childs.map((child: any, i: number) =>
+        const childs: UINode[] = node.childs ?? [];
+        const childLines = childs.map((child: UINode, i: number) =>
             this.formatNodeTree(child, childPrefix, i === childs.length - 1)
         );
 

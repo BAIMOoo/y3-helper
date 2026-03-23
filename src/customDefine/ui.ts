@@ -7,17 +7,17 @@ import { BaseDefine } from "./baseDefine";
 const dirPath = 'ui';
 const prefabPath = 'ui/prefab';
 
-type Node = {
+export type UINode = {
     name: string,
     uid: string,
     type: number,
-    childs: Node[],
+    childs: UINode[],
 };
 
 type UIPackage = {
-    画板: Node[],
-    场景UI: Node[],
-    元件: Node[],
+    画板: UINode[],
+    场景UI: UINode[],
+    元件: UINode[],
 };
 
 export class UI extends BaseDefine {
@@ -40,7 +40,7 @@ export class UI extends BaseDefine {
         return new RelativePattern(this.map.triggerMapUri, dirPath + '/*.json');
     }
 
-    private makeNode(object: any): Node | undefined {
+    private makeNode(object: any): UINode | undefined {
         if (typeof object !== 'object') {
             return;
         }
@@ -50,11 +50,11 @@ export class UI extends BaseDefine {
             type: object['type'],
             childs: (object['children'] as Array<Object>)
                 ?.map(this.makeNode, this)
-                .filter((node): node is Node => node !== undefined),
+                .filter((node): node is UINode => node !== undefined),
         };
     }
 
-    private async loadUI(fileUri: vscode.Uri): Promise<Node|undefined> {
+    private async loadUI(fileUri: vscode.Uri): Promise<UINode|undefined> {
         let jsonText = (await tools.fs.readFile(fileUri))?.string;
         if (!jsonText) {
             return;
@@ -84,7 +84,7 @@ export class UI extends BaseDefine {
             return undefined;
         }
 
-        let nodes: Node[] = [];
+        let nodes: UINode[] = [];
         for (const child of json['children']) {
             let node = this.makeNode(child);
             if (node) {
