@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getCodeMakerConfig } from './configProvider';
 import { handleExtendedMessage } from './messageHandlers';
+import { initMcpHub, getMcpHub, disposeMcpHub } from './mcpHandlers/index';
 
 /**
  * CodeMaker WebView 视图提供者
@@ -25,7 +26,12 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
-    ) {}
+    ) {
+        // 初始化 McpHub 单例，回调用于向前端推送 MCP 状态变更
+        initMcpHub((message) => {
+            this.sendMessage(message);
+        });
+    }
 
     /**
      * 设置 API Server 端口号（启动后回调）
@@ -86,6 +92,7 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
         webviewView.onDidDispose(() => {
             this._view = undefined;
             this._hasInit = false;
+            disposeMcpHub();
         });
 
         // 监听主题变化
@@ -329,6 +336,12 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
                 case 'grep_search':
                     result = await this._toolGrepSearch(tool_params);
                     break;
+                case 'use_mcp_tool':
+                    result = await this._toolUseMcp(tool_params);
+                    break;
+                case 'access_mcp_resource':
+                    result = await this._toolAccessMcpResource(tool_params);
+                    break;
                 default:
                     result = {
                         content: `Tool "${tool_name}" is not supported in Y3Helper integration.`,
@@ -553,6 +566,95 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
             }
         } catch {
             // 忽略权限错误
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    //  MCP 工具调用
+    // ─────────────────────────────────────────────
+
+    /**
+     * use_mcp_tool 工具：调用 MCP 服务器上的工具
+     * tool_params: { server_name: string, tool_name: string, arguments?: object }
+     */
+    private async _toolUseMcp(params: any): Promise<any> {
+        const hub = getMcpHub();
+        if (!hub) {
+            return { content: 'MCP Hub 未初始化', isError: true };
+        }
+        const serverName = params?.server_name;
+        const toolName = params?.tool_name;
+        if (!serverName || !toolName) {
+            return { content: 'Error: server_name and tool_name are required.', isError: true };
+        }
+        try {
+            // 前端传来的 arguments 可能是 JSON 字符串，需要解析
+            let toolArguments = params?.arguments;
+            if (typeof toolArguments === 'string') {
+                try {
+                    toolArguments = JSON.parse(toolArguments);
+                } catch {
+                    // 如果解析失败，保持原样
+                }
+            }
+            console.log(`[CodeMaker] use_mcp_tool: server=${serverName}, tool=${toolName}, args=`, JSON.stringify(toolArguments));
+            const response = await hub.callTool(serverName, toolName, toolArguments);
+            // 将 MCP 响应格式化为文本
+            const textParts: string[] = [];
+            for (const item of (response?.content || [])) {
+                if (item.type === 'text') {
+                    textParts.push(item.text);
+                } else if (item.type === 'image') {
+                    textParts.push(`[Image: ${item.mimeType}]`);
+                } else if (item.type === 'resource') {
+                    textParts.push(item.resource?.text || `[Resource: ${item.resource?.uri}]`);
+                }
+            }
+            return {
+                content: textParts.join('\n') || '(empty response)',
+                isError: response?.isError || false,
+            };
+        } catch (err: any) {
+            return {
+                content: `Error calling MCP tool "${toolName}" on "${serverName}": ${err.message}`,
+                isError: true,
+            };
+        }
+    }
+
+    /**
+     * access_mcp_resource 工具：访问 MCP 服务器上的资源
+     * tool_params: { server_name: string, uri: string }
+     */
+    private async _toolAccessMcpResource(params: any): Promise<any> {
+        const hub = getMcpHub();
+        if (!hub) {
+            return { content: 'MCP Hub 未初始化', isError: true };
+        }
+        const serverName = params?.server_name;
+        const uri = params?.uri;
+        if (!serverName || !uri) {
+            return { content: 'Error: server_name and uri are required.', isError: true };
+        }
+        try {
+            const response = await hub.readResource(serverName, uri);
+            const textParts: string[] = [];
+            for (const item of (response?.contents || [])) {
+                if (item.text) {
+                    textParts.push(item.text);
+                } else if (item.blob) {
+                    textParts.push(`[Binary data from ${item.uri}]`);
+                }
+            }
+            return {
+                content: textParts.join('\n') || '(empty resource)',
+                isError: false,
+            };
+        } catch (err: any) {
+            return {
+                content: `Error accessing MCP resource "${uri}" on "${serverName}": ${err.message}`,
+                isError: true,
+            };
         }
     }
 

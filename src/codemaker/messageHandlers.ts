@@ -17,6 +17,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { CodeMakerWebviewProvider } from './webviewProvider';
+import { getMcpHub } from './mcpHandlers/index';
 
 /**
  * 处理所有从 WebView 发来的消息
@@ -331,48 +332,94 @@ export async function handleExtendedMessage(
         // ═══════════════════════════════════════════
 
         case 'GET_MCP_SERVERS': {
-            await handleGetMcpServers(provider);
+            const hub = getMcpHub();
+            if (hub) {
+                hub.sendLatestMcpServers();
+            } else {
+                console.warn('[CodeMaker] McpHub 未初始化，无法获取 MCP servers');
+            }
             return true;
         }
 
         case 'ADD_MCP_SERVERS': {
-            await handleAddMcpServer(message.data, provider);
+            const hub = getMcpHub();
+            if (hub) {
+                await hub.addMcpServer(message.data);
+            } else {
+                console.warn('[CodeMaker] McpHub 未初始化，无法添加 MCP server');
+            }
             return true;
         }
 
         case 'UPDATE_MCP_SERVERS': {
-            await handleUpdateMcpServer(message.data, provider);
+            const hub = getMcpHub();
+            if (hub) {
+                await hub.upDataMcpConfig(message.data);
+            } else {
+                console.warn('[CodeMaker] McpHub 未初始化，无法更新 MCP server');
+            }
             return true;
         }
 
         case 'REMOVE_MCP_SERVERS': {
-            await handleRemoveMcpServer(message.data, provider);
+            const hub = getMcpHub();
+            if (hub) {
+                const name = message.data?.name;
+                if (name) { await hub.removeMcpServer(name); }
+            } else {
+                console.warn('[CodeMaker] McpHub 未初始化，无法删除 MCP server');
+            }
             return true;
         }
 
         case 'OPEM_MCP_SETTING': {
-            await handleOpenMcpSetting(provider);
+            const hub = getMcpHub();
+            if (hub) {
+                await hub.openMCPSettingFile();
+            } else {
+                console.warn('[CodeMaker] McpHub 未初始化，无法打开 MCP 配置');
+            }
             return true;
         }
 
         case 'PING_MCP_SERVERS':
         case 'RESTART_MCP_SERVERS': {
-            // 重新读取配置并同步到前端
-            await handleGetMcpServers(provider);
+            const hub = getMcpHub();
+            if (hub) {
+                const serverName = message.data?.name || message.data?.serverName;
+                if (serverName) {
+                    await hub.restartConnection(serverName);
+                } else {
+                    await hub.restartAllConnections();
+                }
+            } else {
+                console.warn('[CodeMaker] McpHub 未初始化，无法重启 MCP servers');
+            }
             return true;
         }
 
         case 'GET_MCP_PROMPT': {
-            const { requestId, serverName, promptName } = message.data || {};
-            provider.sendMessage({
-                type: 'GET_MCP_PROMPT_ERROR',
-                data: {
-                    requestId,
-                    serverName,
-                    promptName,
-                    error: 'MCP Prompt is not supported in Y3Helper integration yet.',
-                },
-            });
+            const hub = getMcpHub();
+            const { requestId, serverName, promptName, args } = message.data || {};
+            if (hub) {
+                try {
+                    const result = await hub.getPrompt(serverName, promptName, args);
+                    provider.sendMessage({
+                        type: 'GET_MCP_PROMPT_RESULT',
+                        data: { requestId, serverName, promptName, result },
+                    });
+                } catch (err: any) {
+                    provider.sendMessage({
+                        type: 'GET_MCP_PROMPT_ERROR',
+                        data: { requestId, serverName, promptName, error: err.message },
+                    });
+                }
+            } else {
+                provider.sendMessage({
+                    type: 'GET_MCP_PROMPT_ERROR',
+                    data: { requestId, serverName, promptName, error: 'MCP Hub 未初始化' },
+                });
+            }
             return true;
         }
 
@@ -1414,183 +1461,6 @@ async function handleDeleteRule(data: any, provider: CodeMakerWebviewProvider) {
 }
 
 // ─── 辅助函数 ─────────────────────────────────────────
-
-// ─── MCP Server 管理 ─────────────────────────────────
-
-/** 获取 MCP 配置文件路径 */
-function getMcpSettingsPath(): string | undefined {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (!workspaceFolder) { return undefined; }
-    return path.join(workspaceFolder.uri.fsPath, '.codemaker', 'mcp_settings.json');
-}
-
-/** 读取 MCP 配置文件 */
-async function readMcpSettings(): Promise<Record<string, any>> {
-    const settingsPath = getMcpSettingsPath();
-    if (!settingsPath || !fs.existsSync(settingsPath)) {
-        return { mcpServers: {} };
-    }
-    try {
-        const content = await fs.promises.readFile(settingsPath, 'utf-8');
-        return JSON.parse(content);
-    } catch {
-        return { mcpServers: {} };
-    }
-}
-
-/** 写入 MCP 配置文件 */
-async function writeMcpSettings(settings: Record<string, any>): Promise<void> {
-    const settingsPath = getMcpSettingsPath();
-    if (!settingsPath) { return; }
-    await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
-    await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-}
-
-/** 将配置文件中的 servers 转换为前端格式 */
-function configToServerList(settings: Record<string, any>): any[] {
-    const mcpServers = settings.mcpServers || {};
-    const servers: any[] = [];
-
-    for (const [name, rawConfig] of Object.entries(mcpServers)) {
-        const config = rawConfig as Record<string, any>;
-        servers.push({
-            name,
-            status: config.disabled ? 'disconnected' : 'disconnected',
-            error: '',
-            tools: [],
-            resources: [],
-            resourceTemplates: [],
-            prompts: [],
-            disabled: config.disabled || false,
-            autoApprove: config.autoApprove || false,
-            config: config,
-        });
-    }
-
-    return servers;
-}
-
-async function handleGetMcpServers(provider: CodeMakerWebviewProvider) {
-    const settings = await readMcpSettings();
-    const servers = configToServerList(settings);
-
-    provider.sendMessage({
-        type: 'SYNC_MCP_SERVERS',
-        data: { servers },
-    });
-}
-
-async function handleAddMcpServer(data: any, provider: CodeMakerWebviewProvider) {
-    try {
-        const settings = await readMcpSettings();
-        if (!settings.mcpServers) { settings.mcpServers = {}; }
-
-        // data 可能是 { name: "xxx", ...config } 或 { "serverName": { ...config } }
-        if (data.name) {
-            const { name, ...config } = data;
-            settings.mcpServers[name] = config;
-        } else {
-            // 直接合并
-            Object.assign(settings.mcpServers, data);
-        }
-
-        await writeMcpSettings(settings);
-
-        provider.sendMessage({
-            type: 'NOTIFY_MCP_SERVER_SUCCESS',
-            data: { message: 'MCP Server 添加成功' },
-        });
-
-        await handleGetMcpServers(provider);
-    } catch (err: any) {
-        provider.sendMessage({
-            type: 'SHOW_MCP_ERROR',
-            data: { message: `添加 MCP Server 失败: ${err.message}` },
-        });
-    }
-}
-
-async function handleUpdateMcpServer(data: any, provider: CodeMakerWebviewProvider) {
-    try {
-        const settings = await readMcpSettings();
-        if (!settings.mcpServers) { settings.mcpServers = {}; }
-
-        const { name, originalName, ...config } = data;
-        const serverName = name || originalName;
-
-        // 如果有 originalName 且与 name 不同，先删除旧的（重命名）
-        if (originalName && name && originalName !== name) {
-            delete settings.mcpServers[originalName];
-        }
-
-        if (serverName) {
-            // 合并更新
-            settings.mcpServers[serverName] = {
-                ...(settings.mcpServers[serverName] || {}),
-                ...config,
-            };
-        }
-
-        await writeMcpSettings(settings);
-
-        provider.sendMessage({
-            type: 'NOTIFY_MCP_SERVER_SUCCESS',
-            data: { message: 'MCP Server 更新成功' },
-        });
-
-        await handleGetMcpServers(provider);
-    } catch (err: any) {
-        provider.sendMessage({
-            type: 'SHOW_MCP_ERROR',
-            data: { message: `更新 MCP Server 失败: ${err.message}` },
-        });
-    }
-}
-
-async function handleRemoveMcpServer(data: any, provider: CodeMakerWebviewProvider) {
-    try {
-        const { name } = data;
-        if (!name) { return; }
-
-        const settings = await readMcpSettings();
-        if (settings.mcpServers && settings.mcpServers[name]) {
-            delete settings.mcpServers[name];
-            await writeMcpSettings(settings);
-        }
-
-        provider.sendMessage({
-            type: 'NOTIFY_MCP_SERVER_SUCCESS',
-            data: { message: `MCP Server "${name}" 已删除` },
-        });
-
-        await handleGetMcpServers(provider);
-    } catch (err: any) {
-        provider.sendMessage({
-            type: 'SHOW_MCP_ERROR',
-            data: { message: `删除 MCP Server 失败: ${err.message}` },
-        });
-    }
-}
-
-async function handleOpenMcpSetting(provider: CodeMakerWebviewProvider) {
-    const settingsPath = getMcpSettingsPath();
-    if (!settingsPath) {
-        vscode.window.showErrorMessage('未找到工作区文件夹');
-        return;
-    }
-
-    // 确保配置文件存在
-    if (!fs.existsSync(settingsPath)) {
-        await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
-        const defaultConfig = {
-            mcpServers: {}
-        };
-        await fs.promises.writeFile(settingsPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-    }
-
-    const doc = await vscode.workspace.openTextDocument(settingsPath);
-    await vscode.window.showTextDocument(doc);
-}
 
 // ─── 辅助函数 ─────────────────────────────────────────
 
