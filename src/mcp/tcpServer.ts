@@ -342,6 +342,14 @@ export class TCPServer extends vscode.Disposable {
                                         type: 'string',
                                         enum: ['画板', '场景UI', '元件', 'all'],
                                         description: '要查询的 UI 分类，默认 "all" 返回全部三类',
+                                    },
+                                    nodePath: {
+                                        type: 'string',
+                                        description: '用点分隔的节点路径，如 "MainUI.Panel_Root.Btn_Start"。画板名作为第一段，后续为子节点名称链。不传则返回全量结构。'
+                                    },
+                                    depth: {
+                                        type: 'number',
+                                        description: '从目标节点展开的层数。depth=0 只返回目标节点自身，depth=1 包含直接子节点，以此类推。不传则不限制深度。'
                                     }
                                 }
                             }
@@ -385,6 +393,8 @@ export class TCPServer extends vscode.Disposable {
                         break;
                     case 'get_ui_canvas': {
                         const category: string = toolArgs.category ?? 'all';
+                        const nodePath: string | undefined = toolArgs.nodePath;
+                        const depth: number | undefined = toolArgs.depth !== undefined ? Number(toolArgs.depth) : undefined;
 
                         if (!envImport.env.currentMap) {
                             result = {
@@ -396,6 +406,44 @@ export class TCPServer extends vscode.Disposable {
 
                         try {
                             const uiPackage = await define(envImport.env.currentMap).界面.getUIPackage();
+
+                            // 路径模式：查找指定节点
+                            if (nodePath !== undefined) {
+                                const segments = nodePath.split('.');
+                                let target: UINode | undefined;
+
+                                // 先在画板中查找：第一段匹配画板名，后续在其 childs 中查找
+                                for (const canvas of uiPackage.画板) {
+                                    if (canvas.name === segments[0]) {
+                                        if (segments.length === 1) {
+                                            target = canvas;
+                                        } else {
+                                            target = this.findNodeByPath(canvas.childs ?? [], segments.slice(1));
+                                        }
+                                        if (target) break;
+                                    }
+                                }
+
+                                // 若未找到，再在场景UI中查找
+                                if (!target) {
+                                    target = this.findNodeByPath(uiPackage.场景UI, segments);
+                                }
+
+                                // 若未找到，再在元件中查找
+                                if (!target) {
+                                    target = this.findNodeByPath(uiPackage.元件, segments);
+                                }
+
+                                if (!target) {
+                                    result = { success: false, error: `未找到路径: ${nodePath}` };
+                                    break;
+                                }
+
+                                const canvas = this.formatNodeTree(target, '', true, depth);
+                                result = { success: true, canvas };
+                                break;
+                            }
+
                             const lines: string[] = [];
 
                             const formatSection = (title: string, nodes: UINode[], isCanvas: boolean = false) => {
@@ -413,14 +461,14 @@ export class TCPServer extends vscode.Disposable {
                                         lines.push(`画板: ${node.name}`);
                                         const childs: UINode[] = node.childs ?? [];
                                         childs.forEach((child: UINode, i: number) => {
-                                            lines.push(this.formatNodeTree(child, '', i === childs.length - 1));
+                                            lines.push(this.formatNodeTree(child, '', i === childs.length - 1, depth));
                                         });
                                         lines.push('');
                                     }
                                 } else {
                                     lines.push(`${title}:`);
                                     nodes.forEach((node: UINode, i: number) => {
-                                        lines.push(this.formatNodeTree(node, '', i === nodes.length - 1));
+                                        lines.push(this.formatNodeTree(node, '', i === nodes.length - 1, depth));
                                     });
                                     lines.push('');
                                 }
@@ -581,20 +629,51 @@ export class TCPServer extends vscode.Disposable {
     }
 
     /**
+     * 按路径数组递归查找 UI 节点
+     * @param nodes 当前层级的节点列表
+     * @param pathSegments 剩余路径段
+     */
+    private findNodeByPath(nodes: UINode[], pathSegments: string[]): UINode | undefined {
+        if (pathSegments.length === 0) return undefined;
+        const [head, ...rest] = pathSegments;
+        const found = nodes.find(n => n.name === head);
+        if (!found) return undefined;
+        if (rest.length === 0) return found;
+        return this.findNodeByPath(found.childs ?? [], rest);
+    }
+
+    /**
      * 递归将 UI Node 树格式化为类文件树的文本
      * @param node UI 节点
      * @param prefix 当前行前缀（用于绘制树形线条）
      * @param isLast 是否是父节点的最后一个子节点
+     * @param maxDepth 最大展开深度（undefined 表示不限制）
+     * @param currentDepth 当前深度
      */
-    private formatNodeTree(node: UINode, prefix: string = '', isLast: boolean = true): string {
+    private formatNodeTree(
+        node: UINode,
+        prefix: string = '',
+        isLast: boolean = true,
+        maxDepth?: number,
+        currentDepth: number = 0
+    ): string {
         const connector = isLast ? '└── ' : '├── ';
         const typeName = this.UI_TYPE_NAMES[node.type] ?? `type_${node.type}`;
         const line = `${prefix}${connector}${node.name} [${typeName}] (uid: ${node.uid})`;
 
+        if (maxDepth !== undefined && currentDepth >= maxDepth) {
+            const childCount = (node.childs ?? []).length;
+            if (childCount > 0) {
+                const childPrefix = prefix + (isLast ? '    ' : '│   ');
+                return [line, `${childPrefix}... (${childCount} 个子节点)`].join('\n');
+            }
+            return line;
+        }
+
         const childPrefix = prefix + (isLast ? '    ' : '│   ');
         const childs: UINode[] = node.childs ?? [];
         const childLines = childs.map((child: UINode, i: number) =>
-            this.formatNodeTree(child, childPrefix, i === childs.length - 1)
+            this.formatNodeTree(child, childPrefix, i === childs.length - 1, maxDepth, currentDepth + 1)
         );
 
         return [line, ...childLines].join('\n');
