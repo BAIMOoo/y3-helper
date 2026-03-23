@@ -5,6 +5,8 @@ import * as crypto from 'crypto';
 import * as tools from '../tools';
 import { getTCPConfig, TCPRequest, TCPResponse } from './types';
 import { GameSessionManager } from './gameSessionManager';
+import { define } from '../customDefine';
+import { env as envModule } from '../env';
 
 // MCP Streamable HTTP 端口
 const MCP_HTTP_PORT = 8766;
@@ -301,13 +303,13 @@ export class TCPServer extends vscode.Disposable {
                         { name: 'stop_game', description: '停止游戏', inputSchema: { type: 'object', properties: {} } },
                         { name: 'get_logs', description: '获取游戏日志', inputSchema: { type: 'object', properties: { limit: { type: 'number' } } } },
                         { name: 'capture_screenshot', description: '截图', inputSchema: { type: 'object', properties: {} } },
-                        { 
-                            name: 'read_problems_lua', 
-                            description: '检查 Lua 文件', 
-                            inputSchema: { 
-                                type: 'object', 
-                                properties: { 
-                                    pathGlob: { 
+                        {
+                            name: 'read_problems_lua',
+                            description: '检查 Lua 文件',
+                            inputSchema: {
+                                type: 'object',
+                                properties: {
+                                    pathGlob: {
                                         oneOf: [
                                             { type: 'string', description: '单个路径过滤模式，如 "maps/EntryMap" 或 "src/main.lua"' },
                                             { type: 'array', items: { type: 'string' }, description: '多个路径过滤模式列表' }
@@ -315,7 +317,21 @@ export class TCPServer extends vscode.Disposable {
                                         description: '路径过滤模式（glob 格式），会自动添加 **/*.lua 后缀。默认检查所有 Lua 文件'
                                     }
                                 }
-                            } 
+                            }
+                        },
+                        {
+                            name: 'get_ui_canvas',
+                            description: '获取当前地图的 UI 画板结构，以树形文本返回画板、场景UI、元件中所有控件的层级关系（name、控件类型、uid）。无需游戏运行，只需地图已加载。',
+                            inputSchema: {
+                                type: 'object',
+                                properties: {
+                                    category: {
+                                        type: 'string',
+                                        enum: ['画板', '场景UI', '元件', 'all'],
+                                        description: '要查询的 UI 分类，默认 "all" 返回全部三类',
+                                    }
+                                }
+                            }
                         }
                     ]
                 }
@@ -354,6 +370,67 @@ export class TCPServer extends vscode.Disposable {
                     case 'read_problems_lua':
                         result = await this.sessionManager.readProblemsLua(toolArgs);
                         break;
+                    case 'get_ui_canvas': {
+                        const category: string = toolArgs.category ?? 'all';
+
+                        if (!envModule.currentMap) {
+                            result = {
+                                success: false,
+                                error: '当前没有已加载的地图，请先在 VSCode 中打开 Y3 地图项目'
+                            };
+                            break;
+                        }
+
+                        try {
+                            const uiPackage = await define(envModule.currentMap).界面.getUIPackage();
+                            const lines: string[] = [];
+
+                            const formatSection = (title: string, nodes: any[]) => {
+                                if (nodes.length === 0) {
+                                    lines.push(`${title}: (空)`);
+                                    return;
+                                }
+                                if (title === '画板') {
+                                    // 画板下每个 node 是独立的画布，单独列出
+                                    for (const node of nodes) {
+                                        lines.push(`画板: ${node.name}`);
+                                        const childs: any[] = node.childs ?? [];
+                                        childs.forEach((child: any, i: number) => {
+                                            lines.push(this.formatNodeTree(child, '', i === childs.length - 1));
+                                        });
+                                        lines.push('');
+                                    }
+                                } else {
+                                    lines.push(`${title}:`);
+                                    nodes.forEach((node: any, i: number) => {
+                                        lines.push(this.formatNodeTree(node, '', i === nodes.length - 1));
+                                    });
+                                    lines.push('');
+                                }
+                            };
+
+                            if (category === 'all' || category === '画板') {
+                                formatSection('画板', uiPackage.画板);
+                            }
+                            if (category === 'all' || category === '场景UI') {
+                                formatSection('场景UI', uiPackage.场景UI);
+                            }
+                            if (category === 'all' || category === '元件') {
+                                formatSection('元件', uiPackage.元件);
+                            }
+
+                            result = {
+                                success: true,
+                                canvas: lines.join('\n').trimEnd()
+                            };
+                        } catch (err) {
+                            result = {
+                                success: false,
+                                error: `读取 UI 数据失败: ${err instanceof Error ? err.message : String(err)}`
+                            };
+                        }
+                        break;
+                    }
                     default:
                         return {
                             jsonrpc: '2.0',
@@ -484,6 +561,38 @@ export class TCPServer extends vscode.Disposable {
                 }
             };
         }
+    }
+
+    private readonly UI_TYPE_NAMES: Record<number, string> = {
+        1: 'Button',
+        3: 'TextLabel',
+        4: 'Image',
+        5: 'Progress',
+        7: 'Layout',
+        10: 'ScrollView',
+        18: 'Buff',
+        27: 'Chat_Box',
+        38: 'Sequence_Animation',
+    };
+
+    /**
+     * 递归将 UI Node 树格式化为类文件树的文本
+     * @param node UI 节点
+     * @param prefix 当前行前缀（用于绘制树形线条）
+     * @param isLast 是否是父节点的最后一个子节点
+     */
+    private formatNodeTree(node: any, prefix: string = '', isLast: boolean = true): string {
+        const connector = isLast ? '└── ' : '├── ';
+        const typeName = this.UI_TYPE_NAMES[node.type] ?? `type_${node.type}`;
+        const line = `${prefix}${connector}${node.name} [${typeName}] (uid: ${node.uid})`;
+
+        const childPrefix = prefix + (isLast ? '    ' : '│   ');
+        const childs: any[] = node.childs ?? [];
+        const childLines = childs.map((child: any, i: number) =>
+            this.formatNodeTree(child, childPrefix, i === childs.length - 1)
+        );
+
+        return [line, ...childLines].join('\n');
     }
 
     /**
