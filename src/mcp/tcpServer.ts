@@ -334,22 +334,17 @@ export class TCPServer extends vscode.Disposable {
                         },
                         {
                             name: 'get_ui_canvas',
-                            description: '获取当前地图的 UI 画板结构，以树形文本返回控件的层级关系（name、控件类型、uid）。无需游戏运行，只需地图已加载。支持 nodePath 路径过滤（画板格式："画板名.节点名.子节点名"，场景UI/元件格式："节点名.子节点名"）和 depth 深度控制。',
+                            description: '获取当前地图的 UI 画板结构，以树形文本返回画板中所有控件的层级关系（name、控件类型、uid）。无需游戏运行，只需地图已加载。支持 nodePath 路径过滤（格式："画板名.节点名.子节点名"）和 depth 深度控制。',
                             inputSchema: {
                                 type: 'object',
                                 properties: {
-                                    category: {
-                                        type: 'string',
-                                        enum: ['画板', '场景UI', '元件', 'all'],
-                                        description: '要查询的 UI 分类，默认 "all" 返回全部三类',
-                                    },
                                     nodePath: {
                                         type: 'string',
-                                        description: '用点分隔的节点路径，如 "MainUI.Panel_Root.Btn_Start"。画板名作为第一段，后续为子节点名称链。不传则返回全量结构。'
+                                        description: '用点分隔的节点路径，第一段为画板名，如 "MainUI" 或 "MainUI.Panel_Root.Btn_Start"。不传则返回所有画板的完整结构。'
                                     },
                                     depth: {
                                         type: 'number',
-                                        description: '从目标节点展开的层数。depth=0 只返回目标节点自身，depth=1 包含直接子节点，以此类推。不传则不限制深度。'
+                                        description: '从目标节点展开的层数。depth=0 只返回目标节点自身，depth=1 包���直接子节点，以此类推。不传则不限制深度。'
                                     }
                                 }
                             }
@@ -392,7 +387,6 @@ export class TCPServer extends vscode.Disposable {
                         result = await this.sessionManager.readProblemsLua(toolArgs);
                         break;
                     case 'get_ui_canvas': {
-                        const category: string = toolArgs.category ?? 'all';
                         const nodePath: string | undefined = toolArgs.nodePath;
                         let depth: number | undefined = undefined;
                         if (toolArgs.depth !== undefined) {
@@ -411,12 +405,11 @@ export class TCPServer extends vscode.Disposable {
                         try {
                             const uiPackage = await define(envImport.env.currentMap).界面.getUIPackage();
 
-                            // 路径模式：查找指定节点
+                            // 路径模式：在画板中查找指定节点
                             if (nodePath !== undefined) {
                                 const segments = nodePath.split('.');
                                 let target: UINode | undefined;
 
-                                // 先在画板中查找：第一段匹配画板名，后续在其 childs 中查找
                                 for (const canvas of uiPackage.画板) {
                                     if (canvas.name === segments[0]) {
                                         if (segments.length === 1) {
@@ -426,16 +419,6 @@ export class TCPServer extends vscode.Disposable {
                                         }
                                         if (target) break;
                                     }
-                                }
-
-                                // 若未找到，再在场景UI中查找
-                                if (!target) {
-                                    target = this.findNodeByPath(uiPackage.场景UI, segments);
-                                }
-
-                                // 若未找到，再在元件中查找
-                                if (!target) {
-                                    target = this.findNodeByPath(uiPackage.元件, segments);
                                 }
 
                                 if (!target) {
@@ -448,44 +431,19 @@ export class TCPServer extends vscode.Disposable {
                                 break;
                             }
 
+                            // 全量模式：返回所有画板
                             const lines: string[] = [];
-
-                            const formatSection = (title: string, nodes: UINode[], isCanvas: boolean = false) => {
-                                if (nodes.length === 0) {
-                                    if (isCanvas) {
-                                        lines.push(`${title}: (无)`);
-                                    } else {
-                                        lines.push(`${title}: (空)`);
-                                    }
-                                    return;
-                                }
-                                if (isCanvas) {
-                                    // 画板下每个 node 是独立的画布，单独列出
-                                    for (const node of nodes) {
-                                        lines.push(`画板: ${node.name}`);
-                                        const childs: UINode[] = node.childs ?? [];
-                                        childs.forEach((child: UINode, i: number) => {
-                                            lines.push(this.formatNodeTree(child, '', i === childs.length - 1, depth));
-                                        });
-                                        lines.push('');
-                                    }
-                                } else {
-                                    lines.push(`${title}:`);
-                                    nodes.forEach((node: UINode, i: number) => {
-                                        lines.push(this.formatNodeTree(node, '', i === nodes.length - 1, depth));
+                            if (uiPackage.画板.length === 0) {
+                                lines.push('画板: (无)');
+                            } else {
+                                for (const node of uiPackage.画板) {
+                                    lines.push(`画板: ${node.name}`);
+                                    const childs: UINode[] = node.childs ?? [];
+                                    childs.forEach((child: UINode, i: number) => {
+                                        lines.push(this.formatNodeTree(child, '', i === childs.length - 1, depth));
                                     });
                                     lines.push('');
                                 }
-                            };
-
-                            if (category === 'all' || category === '画板') {
-                                formatSection('画板', uiPackage.画板, true);
-                            }
-                            if (category === 'all' || category === '场景UI') {
-                                formatSection('场景UI', uiPackage.场景UI);
-                            }
-                            if (category === 'all' || category === '元件') {
-                                formatSection('元件', uiPackage.元件);
                             }
 
                             result = {
