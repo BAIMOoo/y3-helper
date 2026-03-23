@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
-import winreg from 'winreg';
 import path from 'path';
+import { execFile } from 'child_process';
+import * as iconv from 'iconv-lite';
 import * as tools from './tools';
 import { Language } from "./editorTable/language";
 import { queue, throttle } from './utility/decorators';
@@ -194,21 +195,24 @@ class Env {
         let platform = os.platform();
         if (platform !== 'win32') {
             return undefined;
-        };
-        let regKey = new winreg({
-            hive: winreg.HKLM,
-            key: "\\SOFTWARE\\Classes\\y3editor",
-        });
-        let editorPath = await new Promise<string|undefined>((resolve, reject) => {
-            regKey.get(winreg.DEFAULT_VALUE, (err, item) => {
-                if (err || !item) {
-                    resolve(undefined);
+        }
+        const regExe = path.join(process.env['windir'] ?? 'C:\\Windows', 'system32', 'reg.exe');
+        const regPath = 'HKLM\\SOFTWARE\\Classes\\y3editor';
+        const stdout = await new Promise<Buffer>((resolve, reject) => {
+            execFile(regExe, ['QUERY', regPath, '/ve'], { encoding: 'buffer', windowsHide: true }, (err, out) => {
+                if (err) {
+                    reject(err);
                 } else {
-                    resolve(item.value);
+                    resolve(out as unknown as Buffer);
                 }
             });
         });
-        if (typeof editorPath !== 'string') {
+        // reg.exe 在中文 Windows 下输出 GBK 编码，需用 iconv-lite 解码
+        const output = iconv.decode(stdout, 'gbk');
+        // 匹配形如：    (默认)    REG_SZ    C:\some\path\Editor.exe
+        const match = output.match(/REG_SZ\s+(.+)/);
+        const editorPath = match?.[1]?.trim();
+        if (!editorPath) {
             return undefined;
         }
         return vscode.Uri.file(editorPath);
