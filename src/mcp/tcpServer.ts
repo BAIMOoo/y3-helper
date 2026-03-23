@@ -334,17 +334,17 @@ export class TCPServer extends vscode.Disposable {
                         },
                         {
                             name: 'get_ui_canvas',
-                            description: '获取当前地图的 UI 画板结构，以树形文本返回画板中所有控件的层级关系（name、控件类型、uid）。无需游戏运行，只需地图已加载。支持 nodePath 路径过滤（格式："画板名.节点名.子节点名"）和 depth 深度控制。',
+                            description: '获取当前地图的 UI 画板结构，以树形文本返回画板中所有控件的层级关系（name、控件类型、uid）。无需游戏运行，只需地图已加载。默认只展开第一层子节点（depth=1），可通过 nodePath 定位到具体节点、通过 depth 控制展开深度。',
                             inputSchema: {
                                 type: 'object',
                                 properties: {
                                     nodePath: {
                                         type: 'string',
-                                        description: '用点分隔的节点路径，第一段为画板名，如 "MainUI" 或 "MainUI.Panel_Root.Btn_Start"。不传则返回所有画板的完整结构。'
+                                        description: '用点分隔的节点路径，第一段为画板名，如 "MainUI" 或 "MainUI.Panel_Root.Btn_Start"。不传则返回所有画板。'
                                     },
                                     depth: {
                                         type: 'number',
-                                        description: '从目标节点展开的层数。depth=0 只返回目标节点自身，depth=1 包���直接子节点，以此类推。不传则不限制深度。'
+                                        description: '从目标节点展开的层数。depth=0 只返回目标节点自身，depth=1 包含直接子节点，以此类推。默认为 1。传 -1 返回完整树。'
                                     }
                                 }
                             }
@@ -388,10 +388,12 @@ export class TCPServer extends vscode.Disposable {
                         break;
                     case 'get_ui_canvas': {
                         const nodePath: string | undefined = toolArgs.nodePath;
-                        let depth: number | undefined = undefined;
+                        let depth: number | undefined = 1; // 默认展开第一层
                         if (toolArgs.depth !== undefined) {
                             const rawDepth = Number(toolArgs.depth);
-                            depth = isNaN(rawDepth) ? undefined : Math.max(0, Math.floor(rawDepth));
+                            if (!isNaN(rawDepth)) {
+                                depth = rawDepth === -1 ? undefined : Math.max(0, Math.floor(rawDepth));
+                            }
                         }
 
                         if (!envImport.env.currentMap) {
