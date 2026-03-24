@@ -921,18 +921,27 @@ async function handleAcceptEdit(data: any, provider: CodeMakerWebviewProvider) {
             // 检查冲突
             if (!force && fs.existsSync(absPath)) {
                 const currentContent = await fs.promises.readFile(absPath, 'utf-8');
+                console.log(`[CodeMaker] ACCEPT_EDIT conflict check: beforeEdit.length=${beforeEdit?.length}, currentContent.length=${currentContent.length}, match=${currentContent === beforeEdit}`);
                 if (beforeEdit && currentContent !== beforeEdit) {
-                    provider.sendMessage({
-                        type: 'ACCEPT_EDIT_RESULT',
-                        data: {
-                            result: {
-                                success: false,
-                                message: '文件内容已被修改，请使用强制应用或先预览差异',
-                                item,
+                    // 尝试换行符归一化后再比较
+                    const normalizedCurrent = currentContent.replace(/\r\n/g, '\n');
+                    const normalizedBefore = (beforeEdit || '').replace(/\r\n/g, '\n');
+                    if (normalizedCurrent !== normalizedBefore) {
+                        console.log(`[CodeMaker] ACCEPT_EDIT: 归一化后仍不匹配, diff at char ${findFirstDiff(normalizedCurrent, normalizedBefore)}`);
+                        provider.sendMessage({
+                            type: 'ACCEPT_EDIT_RESULT',
+                            data: {
+                                result: {
+                                    success: false,
+                                    message: '文件内容已被修改，请使用强制应用或先预览差异',
+                                    item,
+                                },
                             },
-                        },
-                    });
-                    return;
+                        });
+                        return;
+                    }
+                    // 换行符差异，不算冲突，继续执行
+                    console.log(`[CodeMaker] ACCEPT_EDIT: 仅换行符差异，允许应用`);
                 }
             }
             await fs.promises.writeFile(absPath, finalResult || '', 'utf-8');
@@ -1462,7 +1471,14 @@ async function handleDeleteRule(data: any, provider: CodeMakerWebviewProvider) {
 
 // ─── 辅助函数 ─────────────────────────────────────────
 
-// ─── 辅助函数 ─────────────────────────────────────────
+/** 找到两个字符串第一个不同字符的位置 */
+function findFirstDiff(a: string, b: string): number {
+    const len = Math.min(a.length, b.length);
+    for (let i = 0; i < len; i++) {
+        if (a[i] !== b[i]) { return i; }
+    }
+    return a.length !== b.length ? len : -1;
+}
 
 function getLanguageId(filePath: string): string {
     const ext = path.extname(filePath).toLowerCase();

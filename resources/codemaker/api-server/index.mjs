@@ -12,6 +12,7 @@ import { config, printConfigStatus } from './config.mjs';
 import { registerChatRoutes } from './routes/chat.mjs';
 import { registerHealthRoutes } from './routes/health.mjs';
 import { registerHistoryRoutes, getOrCreateSession, updateSession } from './routes/history.mjs';
+import { registerApplyRoutes } from './routes/apply.mjs';
 
 // 静态文件 MIME 类型映射
 const MIME_TYPES = {
@@ -41,6 +42,7 @@ const routes = new Map();
 registerHealthRoutes(routes);
 registerChatRoutes(routes);
 registerHistoryRoutes(routes);
+registerApplyRoutes(routes);
 
 /**
  * 解析请求体

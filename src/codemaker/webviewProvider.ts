@@ -316,7 +316,7 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        console.log(`[CodeMaker] TOOL_CALL: ${tool_name}, id: ${tool_id}`);
+        console.log(`[CodeMaker] TOOL_CALL: ${tool_name}, id: ${tool_id}, params:`, JSON.stringify(tool_params).substring(0, 500));
 
         try {
             let result: any;
@@ -336,6 +336,31 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
                 case 'grep_search':
                     result = await this._toolGrepSearch(tool_params);
                     break;
+                case 'write_to_file':
+                    result = await this._toolWriteToFile(tool_params);
+                    break;
+                case 'edit_file':
+                    result = await this._toolEditFile(tool_params);
+                    break;
+                case 'replace_in_file':
+                    result = await this._toolReplaceInFile(tool_params);
+                    break;
+                case 'reapply':
+                    result = await this._toolEditFile(tool_params);
+                    break;
+                case 'run_terminal_cmd':
+                    result = await this._toolRunTerminalCmd(tool_params);
+                    break;
+                case 'make_plan':
+                case 'write_todo':
+                    result = await this._toolMakePlan(tool_params);
+                    break;
+                case 'use_skill':
+                    result = await this._toolUseSkill(tool_params);
+                    break;
+                case 'generate_codewiki_structure':
+                    result = await this._toolGenerateCodewiki(tool_params);
+                    break;
                 case 'use_mcp_tool':
                     result = await this._toolUseMcp(tool_params);
                     break;
@@ -350,13 +375,14 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
                     break;
             }
 
+            console.log(`[CodeMaker] TOOL_CALL_RESULT: tool=${tool_name}, isError=${result?.isError}, content.length=${result?.content?.length || 0}`);
             this.sendMessage({
                 type: 'TOOL_CALL_RESULT',
                 data: {
                     tool_result: result,
                     tool_id: tool_id,
                     tool_name: tool_name,
-                    extra: {},
+                    extra: result?.extra || {},
                 },
             });
         } catch (err: any) {
@@ -567,6 +593,385 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
         } catch {
             // 忽略权限错误
         }
+    }
+
+    // ─────────────────────────────────────────────
+    //  文件写入/编辑工具（对齐源码版 executeFunction.ts）
+    // ─────────────────────────────────────────────
+
+    /**
+     * write_to_file 工具：创建新文件或完全覆写已有文件
+     */
+    private async _toolWriteToFile(params: any): Promise<any> {
+        try {
+            const filePath = params?.path;
+            const content = params?.content ?? '';
+            if (!filePath) {
+                return { content: 'Error: path is required.', isError: true, path: '' };
+            }
+            const absolutePath = this._resolvePath(filePath);
+            const fsModule = require('fs');
+            const fileExist = fsModule.existsSync(absolutePath);
+            const currentContent = fileExist ? fsModule.readFileSync(absolutePath, 'utf-8') : '';
+
+            // 不在这里写磁盘，前端通过 ACCEPT_EDIT 执行真正写入
+            return {
+                content: content,
+                isError: false,
+                path: filePath,
+                extra: {
+                    beforeEdit: currentContent,
+                    finalResult: content,
+                    isCreateFile: !fileExist,
+                    filePath: filePath,
+                    taskId: '',
+                },
+            };
+        } catch (err: any) {
+            return { content: `Error writing file: ${err.message}`, isError: true, path: '' };
+        }
+    }
+
+    /**
+     * edit_file / reapply 工具：对齐源码版 editFile
+     * 新文件/空文件 → 直接使用 codeEdit
+     * 已有内容 → 调用本地 API Server 的 /api/v1/apply/edit 做 AI 智能合并
+     */
+    private async _toolEditFile(params: any): Promise<any> {
+        try {
+            console.log('[CodeMaker] edit_file params:', JSON.stringify(params).substring(0, 500));
+            const targetFile = params?.target_file || params?.path;
+            const codeEdit = params?.code_edit ?? params?.content ?? '';
+            const isCreateFile = params?.is_create_file || false;
+            console.log(`[CodeMaker] edit_file: target=${targetFile}, codeEdit.length=${codeEdit.length}, isCreate=${isCreateFile}`);
+            if (!targetFile) {
+                return { content: 'Error: target_file is required.', isError: true, path: '' };
+            }
+            const absolutePath = this._resolvePath(targetFile);
+            const fsModule = require('fs');
+            const fileExist = fsModule.existsSync(absolutePath);
+            let currentContent = '';
+
+            if (!fileExist) {
+                // 宽容处理：AI 经常省略 is_create_file
+            } else {
+                const doc = await vscode.workspace.openTextDocument(absolutePath);
+                currentContent = doc.getText();
+            }
+
+            let updatedContent: string;
+            if (currentContent === '' || !fileExist) {
+                // 新文件或空文件：直接使用 codeEdit
+                updatedContent = codeEdit;
+            } else {
+                // 已有内容的文件：调用 apply API 做智能合并
+                try {
+                    updatedContent = await this._applyEditViaApi(currentContent, codeEdit, absolutePath);
+                    console.log(`[CodeMaker] edit_file: apply API 合并成功, result.length=${updatedContent.length}`);
+                } catch (applyErr: any) {
+                    console.warn(`[CodeMaker] edit_file: apply API 失败 (${applyErr.message}), 回退为直接覆写`);
+                    // 回退：直接使用 codeEdit
+                    updatedContent = codeEdit;
+                }
+            }
+
+            // 不在这里写磁盘！前端会通过 ACCEPT_EDIT 来执行真正的写入
+            return {
+                content: updatedContent,
+                path: targetFile,
+                extra: {
+                    editSnippet: codeEdit,
+                    beforeEdit: currentContent,
+                    finalResult: updatedContent,
+                    isCreateFile: !fileExist,
+                    filePath: targetFile,
+                    taskId: '',
+                },
+                isError: false,
+            };
+        } catch (err: any) {
+            return { content: `Error editing file: ${err.message}`, isError: true, path: params?.target_file || '' };
+        }
+    }
+
+    /**
+     * 调用本地 API Server 的 /api/v1/apply/edit 做智能合并
+     * 对齐源码版 getFinalResultStream
+     */
+    private async _applyEditViaApi(beforeEdit: string, editSnippet: string, filePath: string): Promise<string> {
+        const http = require('http');
+        const apiPort = this._apiServerPort;
+        if (!apiPort) {
+            throw new Error('API Server 未启动');
+        }
+
+        // 换行符归一化
+        const normalizedBefore = beforeEdit.replace(/\r\n/g, '\n');
+        const normalizedSnippet = editSnippet.replace(/\r\n/g, '\n');
+
+        // 构建和源码版 getFinalResultStream 一样的请求体
+        const systemPrompt = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated.";
+        const userPrompt = `Merge all changes from the <update> snippet into the <code> below.
+- Preserve the code's structure, order, comments, and indentation exactly.
+- Output only the updated code, enclosed within <updated-code> and </updated-code> tags.
+- Do not include any additional text, explanations, placeholders, ellipses, or code fences.
+- Do not change unrelavant parts beyond the update.
+
+<code>${normalizedBefore}</code>
+
+<update>${normalizedSnippet}</update>
+
+Provide the complete updated code.`;
+
+        const requestBody = JSON.stringify({
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt },
+            ],
+            model: 'fast_apply_7b',
+            temperature: 0,
+            original_content: normalizedBefore,
+            code_edit: normalizedSnippet,
+            task_id: '',
+            stream: true,
+            filePath: filePath,
+            isFallback: false,
+        });
+
+        return new Promise<string>((resolve, reject) => {
+            const req = http.request({
+                hostname: '127.0.0.1',
+                port: apiPort,
+                path: '/api/v1/apply/edit',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(requestBody),
+                },
+                timeout: 30000,
+            }, (res: any) => {
+                let data = '';
+                res.on('data', (chunk: string) => { data += chunk; });
+                res.on('end', () => {
+                    // 解析 SSE 流式响应，提取合并结果
+                    let content = '';
+                    const lines = data.split('\n');
+                    for (const line of lines) {
+                        if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                            try {
+                                const json = JSON.parse(line.slice(6));
+                                const delta = json?.choices?.[0]?.delta?.content;
+                                if (delta) { content += delta; }
+                            } catch { /* 跳过非 JSON 行 */ }
+                        }
+                    }
+
+                    if (!content) {
+                        reject(new Error('apply API 返回空内容'));
+                        return;
+                    }
+
+                    // 提取 <updated-code> 标签内的内容
+                    let finalResult = content;
+                    if (finalResult.includes('<updated-code>') && finalResult.includes('</updated-code>')) {
+                        const match = finalResult.match(/<updated-code>([\s\S]*?)<\/updated-code>/);
+                        if (match) { finalResult = match[1]; }
+                    }
+
+                    // 去掉可能的 code fence
+                    const trimmed = finalResult.trim();
+                    const fenceMatch = trimmed.match(/^```(\w+)?\s*\n([\s\S]*?)\n```$/);
+                    if (fenceMatch) { finalResult = fenceMatch[2]; }
+
+                    // 还原换行符
+                    if (beforeEdit.includes('\r\n')) {
+                        finalResult = finalResult.replace(/\n/g, '\r\n');
+                    }
+
+                    resolve(finalResult);
+                });
+            });
+
+            req.on('error', (err: any) => reject(err));
+            req.on('timeout', () => {
+                req.destroy();
+                reject(new Error('apply API 请求超时'));
+            });
+            req.write(requestBody);
+            req.end();
+        });
+    }
+
+    /**
+     * replace_in_file 工具：对齐源码版 replaceInFile（三层匹配策略）
+     */
+    private async _toolReplaceInFile(params: any): Promise<any> {
+        const { constructNewFileContent } = require('./tools/constructNewFileContent');
+        try {
+            const targetFile = params?.target_file || params?.path;
+            const replaceSnippet = params?.diff ?? '';
+            const isCreateFile = params?.is_create_file || false;
+            if (!targetFile) {
+                return { content: 'Error: target_file is required.', isError: true, path: '' };
+            }
+            const absolutePath = this._resolvePath(targetFile);
+            console.log(`[CodeMaker] replace_in_file: target=${targetFile}, absolutePath=${absolutePath}, isCreate=${isCreateFile}`);
+            console.log(`[CodeMaker] replace_in_file diff: ${replaceSnippet.substring(0, 300)}`);
+            const fsModule = require('fs');
+            const fileExist = fsModule.existsSync(absolutePath);
+            let currentContent = '';
+
+            if (!fileExist) {
+                if (!isCreateFile) {
+                    // 宽容处理：文件不存在时自动创建（AI 经常省略 is_create_file）
+                    console.log(`[CodeMaker] replace_in_file: file not exist, auto creating: ${absolutePath}`);
+                }
+            } else {
+                const doc = await vscode.workspace.openTextDocument(absolutePath);
+                currentContent = doc.getText();
+            }
+
+            // 换行符归一化
+            const normalizedContent = currentContent.replace(/\r\n/g, '\n');
+            const normalizedSnippet = replaceSnippet.replace(/\r\n/g, '\n');
+
+            // 使用源码版三层匹配引擎
+            const updatedContent = constructNewFileContent(normalizedSnippet, normalizedContent);
+
+            // 还原换行符
+            const originalUseCRLF = currentContent.includes('\r\n');
+            const finalContent = originalUseCRLF ? updatedContent.replace(/\n/g, '\r\n') : updatedContent;
+
+            // 不在这里写磁盘！前端会通过 ACCEPT_EDIT 来执行真正的写入
+            return {
+                content: finalContent,
+                path: targetFile,
+                extra: {
+                    beforeEdit: currentContent,
+                    finalResult: finalContent,
+                    isCreateFile: !fileExist,
+                    filePath: targetFile,
+                    taskId: '',
+                    fallbackApply: false,
+                },
+                isError: false,
+            };
+        } catch (err: any) {
+            return { content: `Error replace in file: ${err.message}`, isError: true, path: params?.target_file || '' };
+        }
+    }
+
+    /**
+     * run_terminal_cmd 工具：在终端中执行命令
+     * 源码版有完整的 TerminalManager + Shell Integration，我们简化为直接执行
+     */
+    private async _toolRunTerminalCmd(params: any): Promise<any> {
+        const command = params?.command;
+        if (!command) {
+            return { content: 'Error: command is required.', isError: true, path: '' };
+        }
+        try {
+            const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+            const cp = require('child_process');
+            
+            return new Promise<any>((resolve) => {
+                const options: any = { cwd: workspace, encoding: 'utf-8', timeout: 30000, maxBuffer: 1024 * 1024 * 5 };
+                cp.exec(command, options, (error: any, stdout: string, stderr: string) => {
+                    const output = stdout || '';
+                    const errOutput = stderr || '';
+
+                    // Windows cmd 命令判断：
+                    // - error 为 null → 成功
+                    // - error.code 存在且非 0 → 真正的失败
+                    // - error.killed / error.signal → 被杀死/超时
+                    // - 其他情况（error 存在但 code 为 undefined 或 null）→ 视为成功
+                    let isRealError = false;
+                    let exitCode = 0;
+                    if (error) {
+                        exitCode = typeof error.code === 'number' ? error.code : 0;
+                        isRealError = exitCode !== 0 || !!error.killed || !!error.signal;
+                    }
+
+                    console.log(`[CodeMaker] run_terminal_cmd: error=${!!error}, exitCode=${exitCode}, killed=${error?.killed}, signal=${error?.signal}, stdout.len=${output.length}, stderr.len=${errOutput.length}`);
+
+                    if (isRealError) {
+                        resolve({
+                            content: `Command failed (exit code ${exitCode}).\nOutput: ${output}\nError: ${errOutput || error.message}\n`,
+                            path: command,
+                            isError: true,
+                            extra: {
+                                messageId: params?.messageId,
+                                terminalId: params?.tool_id,
+                                terminalStatus: 'Failed',
+                                hasShellIntegration: false,
+                                status: 'Failed',
+                            },
+                        });
+                    } else {
+                        const resultText = output || 'Command executed successfully.\n';
+                        resolve({
+                            content: `Command executed successfully.\nOutput: ${resultText}${errOutput ? '\nStderr: ' + errOutput : ''}\n`,
+                            path: command,
+                            isError: false,
+                            extra: {
+                                messageId: params?.messageId,
+                                terminalId: params?.tool_id,
+                                terminalStatus: 'Success',
+                                hasShellIntegration: false,
+                                status: '',
+                            },
+                        });
+                    }
+                });
+            });
+        } catch (err: any) {
+            return { content: `Error running command: ${err.message}`, isError: true, path: '' };
+        }
+    }
+
+    /**
+     * make_plan / write_todo 工具：源码版直接返回 ok
+     */
+    private async _toolMakePlan(_params: any): Promise<any> {
+        return { content: 'ok', path: '', isError: false };
+    }
+
+    /**
+     * use_skill 工具：暂不支持，返回提示
+     */
+    private async _toolUseSkill(params: any): Promise<any> {
+        const skillName = params?.skill_name || 'unknown';
+        return {
+            content: `Skill "${skillName}" is not yet supported in Y3Helper integration.`,
+            path: skillName,
+            isError: true,
+        };
+    }
+
+    /**
+     * generate_codewiki_structure 工具：暂不支持
+     */
+    private async _toolGenerateCodewiki(_params: any): Promise<any> {
+        return {
+            content: 'generate_codewiki_structure is not yet supported in Y3Helper integration.',
+            path: '',
+            isError: true,
+        };
+    }
+
+    /**
+     * 将相对路径解析为绝对路径（相对于工作区根目录）
+     */
+    private _resolvePath(filePath: string): string {
+        const path = require('path');
+        if (path.isAbsolute(filePath)) {
+            return filePath;
+        }
+        const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (workspace) {
+            return path.join(workspace, filePath);
+        }
+        return filePath;
     }
 
     // ─────────────────────────────────────────────
