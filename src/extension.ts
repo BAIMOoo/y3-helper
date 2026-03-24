@@ -289,14 +289,16 @@ class Helper {
         });
     }
 
-    private async startTCPServer() {
+    private async startTCPServer(silent: boolean = false) {
         try {
             this.tcpServer = new mcp.TCPServer();
             await this.tcpServer.start();
             tools.log.info('[Y3-Helper] TCP Server started for MCP');
         } catch (error) {
             tools.log.error('[Y3-Helper] Failed to start TCP Server:', error);
-            vscode.window.showErrorMessage(l10n.t('启动 MCP TCP 服务器失败'));
+            if (!silent) {
+                vscode.window.showErrorMessage(l10n.t('启动 MCP TCP 服务器失败'));
+            }
         }
     }
 
@@ -555,9 +557,13 @@ class Helper {
         this.registerCommandOfNetworkServer();
         this.registerCommonCommands();
 
-        setTimeout(() => {
+        setTimeout(async () => {
             this.checkNewProject();
             mainMenu.init();
+            // 默认自动启动 MCP Server（静默模式，端口冲突时不弹错误）
+            if (!this.tcpServer) {
+                await this.startTCPServer(true);
+            }
             metaBuilder.init();
             debug.init(this.context);
             console.init();

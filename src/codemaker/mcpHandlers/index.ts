@@ -121,7 +121,27 @@ export class McpHub {
 
         if (!(await fileExists(settingsPath))) {
             await fs.mkdir(settingsDir, { recursive: true });
-            await fs.writeFile(settingsPath, JSON.stringify({ mcpServers: {} }, null, 2));
+            const defaultSettings = {
+                mcpServers: {
+                    "y3editor": {
+                        type: "streamableHttp",
+                        url: "http://127.0.0.1:8765/mcp",
+                        headers: {},
+                        timeout: 60,
+                        autoApprove: true,
+                        disabled: false,
+                    },
+                    "y3-helper": {
+                        type: "streamableHttp",
+                        url: "http://127.0.0.1:8766/mcp",
+                        headers: {},
+                        timeout: 60,
+                        autoApprove: true,
+                        disabled: false,
+                    },
+                },
+            };
+            await fs.writeFile(settingsPath, JSON.stringify(defaultSettings, null, 2));
         }
         return settingsPath;
     }

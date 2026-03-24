@@ -81,7 +81,14 @@ export class TCPServer extends vscode.Disposable {
                 tools.log.info(`[MCP] TCP Server listening on ${config.host}:${config.port}`);
                 resolve();
             });
-            this.server!.on('error', reject);
+            this.server!.on('error', (err: NodeJS.ErrnoException) => {
+                if (err.code === 'EADDRINUSE') {
+                    tools.log.warn(`[MCP] Port ${config.port} is in use, TCP Server disabled (another Y3Helper instance may be running)`);
+                    resolve(); // 不阻止启动，多开场景下静默跳过
+                } else {
+                    reject(err);
+                }
+            });
         });
     }
 
