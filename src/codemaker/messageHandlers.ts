@@ -914,42 +914,81 @@ async function handleAcceptEdit(data: any, provider: CodeMakerWebviewProvider) {
 
     try {
         const absPath = resolveFilePath(filePath);
-        if (isCreateFile) {
+        let fileExist = fs.existsSync(absPath);
+
+        if (isCreateFile && !fileExist) {
+            // 真正的新建文件：目标不存在，先创建空文件
             await fs.promises.mkdir(path.dirname(absPath), { recursive: true });
-            await fs.promises.writeFile(absPath, finalResult || '', 'utf-8');
-        } else {
-            // 检查冲突
-            if (!force && fs.existsSync(absPath)) {
-                const currentContent = await fs.promises.readFile(absPath, 'utf-8');
-                console.log(`[CodeMaker] ACCEPT_EDIT conflict check: beforeEdit.length=${beforeEdit?.length}, currentContent.length=${currentContent.length}, match=${currentContent === beforeEdit}`);
-                if (beforeEdit && currentContent !== beforeEdit) {
-                    // 尝试换行符归一化后再比较
-                    const normalizedCurrent = currentContent.replace(/\r\n/g, '\n');
-                    const normalizedBefore = (beforeEdit || '').replace(/\r\n/g, '\n');
-                    if (normalizedCurrent !== normalizedBefore) {
-                        console.log(`[CodeMaker] ACCEPT_EDIT: 归一化后仍不匹配, diff at char ${findFirstDiff(normalizedCurrent, normalizedBefore)}`);
-                        provider.sendMessage({
-                            type: 'ACCEPT_EDIT_RESULT',
-                            data: {
-                                result: {
-                                    success: false,
-                                    message: '文件内容已被修改，请使用强制应用或先预览差异',
-                                    item,
-                                },
-                            },
-                        });
-                        return;
-                    }
-                    // 换行符差异，不算冲突，继续执行
-                    console.log(`[CodeMaker] ACCEPT_EDIT: 仅换行符差异，允许应用`);
-                }
-            }
-            await fs.promises.writeFile(absPath, finalResult || '', 'utf-8');
+            await fs.promises.writeFile(absPath, '', 'utf-8');
         }
 
-        // 打开文件
-        const doc = await vscode.workspace.openTextDocument(absPath);
-        await vscode.window.showTextDocument(doc);
+        // 打开文档（通过 VSCode Document API）
+        const currentDocument = await vscode.workspace.openTextDocument(absPath);
+        
+        // 检查文件是否有未保存的修改
+        if (currentDocument.isDirty) {
+            console.log(`[CodeMaker] ACCEPT_EDIT: 文件有未保存改动, path=${absPath}`);
+            provider.sendMessage({
+                type: 'ACCEPT_EDIT_RESULT',
+                data: {
+                    result: {
+                        success: false,
+                        message: '文件有未保存改动，请先保存文件后再应用',
+                        item,
+                    },
+                },
+            });
+            return;
+        }
+
+        const currentContent = currentDocument.getText();
+        const afterEdit = finalResult || '';
+
+        // 如果内容已经一致，说明已经应用过了，直接返回成功（对齐源码版）
+        if (currentContent.replace(/\r\n/g, '\n') === afterEdit.replace(/\r\n/g, '\n') && fileExist) {
+            console.log(`[CodeMaker] ACCEPT_EDIT: 内容已一致，跳过写入`);
+            provider.sendMessage({
+                type: 'ACCEPT_EDIT_RESULT',
+                data: { result: { success: true, item } },
+            });
+            return;
+        }
+
+        // 冲突检查：忽略空白字符后比较（对齐源码版 replace(/\s/g, '')）
+        if (!force && fileExist && beforeEdit) {
+            if (currentContent.replace(/\s/g, '') !== beforeEdit.replace(/\s/g, '')) {
+                console.log(`[CodeMaker] ACCEPT_EDIT: 文件内容有变动, beforeEdit.length=${beforeEdit.length}, currentContent.length=${currentContent.length}`);
+                provider.sendMessage({
+                    type: 'ACCEPT_EDIT_RESULT',
+                    data: {
+                        result: {
+                            success: false,
+                            message: '文件内容有变动，请尝试 reapply',
+                            item,
+                        },
+                    },
+                });
+                return;
+            }
+        }
+
+        // 通过 VSCode Document API 写入（对齐源码版 updateDocumentContent）
+        await vscode.window.showTextDocument(currentDocument, {
+            preview: false,
+            viewColumn: vscode.ViewColumn.Active,
+            preserveFocus: true,
+        });
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            const edit = new vscode.WorkspaceEdit();
+            edit.replace(
+                currentDocument.uri,
+                new vscode.Range(0, 0, currentDocument.lineCount, 0),
+                afterEdit,
+            );
+            await vscode.workspace.applyEdit(edit);
+            await currentDocument.save();
+        }
 
         provider.sendMessage({
             type: 'ACCEPT_EDIT_RESULT',
@@ -1471,14 +1510,6 @@ async function handleDeleteRule(data: any, provider: CodeMakerWebviewProvider) {
 
 // ─── 辅助函数 ─────────────────────────────────────────
 
-/** 找到两个字符串第一个不同字符的位置 */
-function findFirstDiff(a: string, b: string): number {
-    const len = Math.min(a.length, b.length);
-    for (let i = 0; i < len; i++) {
-        if (a[i] !== b[i]) { return i; }
-    }
-    return a.length !== b.length ? len : -1;
-}
 
 function getLanguageId(filePath: string): string {
     const ext = path.extname(filePath).toLowerCase();

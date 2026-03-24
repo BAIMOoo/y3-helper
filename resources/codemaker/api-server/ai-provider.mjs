@@ -140,15 +140,14 @@ function buildResponsesUrl(baseUrl) {
  */
 function buildResponsesRequestBody(requestBody) {
   // 移除客户端特有字段和 Chat Completions 特有参数
-  // Responses API 不支持: temperature, top_p, frequency_penalty, presence_penalty,
-  // max_tokens, n, stop, logprobs, top_logprobs, response_format, seed, tools, tool_choice 等
   const { 
     app_id, app_key, api_key, base_url, api_base_url, 
     codebase_chat_mode, messages,
-    // Chat Completions 特有参数，Responses API 不支持
+    // Chat Completions 特有参数
     temperature, top_p, frequency_penalty, presence_penalty,
     max_tokens, n, stop, logprobs, top_logprobs, 
-    response_format, seed, tools, tool_choice,
+    response_format, seed, 
+    tools: chatTools, tool_choice: chatToolChoice,
     stream, // 我们自己控制 stream
     ...restBody 
   } = requestBody;
@@ -161,7 +160,40 @@ function buildResponsesRequestBody(requestBody) {
   // 1. content 为数组时，type: "text" → type: "input_text"
   // 2. 前端自定义字段（如 reuseStart）需要过滤
   // 3. assistant 消息的 content 数组 type: "text" → type: "output_text"
-  const input = (messages || []).map(msg => {
+  const input = [];
+  for (const msg of (messages || [])) {
+    // role: "tool" → Responses API 的 function_call_output 格式
+    if (msg.role === 'tool') {
+      const callId = msg.tool_call_id?.startsWith('fc_') ? msg.tool_call_id : 'fc_' + (msg.tool_call_id || Date.now());
+      input.push({
+        type: 'function_call_output',
+        call_id: callId,
+        output: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+      });
+      continue;
+    }
+
+    // role: "assistant" 且有 tool_calls → 转换为 function_call 输出项
+    if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+      // 先输出文本内容（如果有）
+      if (msg.content) {
+        input.push({ role: 'assistant', content: msg.content });
+      }
+      // 再输出每个 function_call
+      for (const tc of msg.tool_calls) {
+        // Responses API 要求 id 以 'fc_' 开头
+        const callId = tc.id?.startsWith('fc_') ? tc.id : 'fc_' + (tc.id || Date.now());
+        input.push({
+          type: 'function_call',
+          id: callId,
+          call_id: callId,
+          name: tc.function?.name || '',
+          arguments: tc.function?.arguments || '{}',
+        });
+      }
+      continue;
+    }
+
     let content = msg.content;
     
     // 如果 content 是数组（多模态格式），转换 type 字段
@@ -179,8 +211,8 @@ function buildResponsesRequestBody(requestBody) {
       });
     }
     
-    return { role: msg.role, content };
-  });
+    input.push({ role: msg.role, content });
+  }
 
   const body = {
     ...restBody,
@@ -191,6 +223,24 @@ function buildResponsesRequestBody(requestBody) {
   // max_tokens → max_output_tokens（Responses API 的字段名）
   if (max_tokens) {
     body.max_output_tokens = max_tokens;
+  }
+
+  // tools 转换: Chat Completions 格式 → Responses API 格式
+  // Chat Completions: [{ type: "function", function: { name, description, parameters } }]
+  // Responses API:    [{ type: "function", name, description, parameters }]
+  if (chatTools && chatTools.length > 0) {
+    body.tools = chatTools.map(tool => {
+      if (tool.type === 'function' && tool.function) {
+        return {
+          type: 'function',
+          name: tool.function.name,
+          description: tool.function.description || '',
+          parameters: tool.function.parameters || {},
+        };
+      }
+      return tool; // 非 function 类型保持原样
+    });
+    console.log(`[AI Provider] [Responses API] 转换了 ${body.tools.length} 个 tools`);
   }
 
   return body;
@@ -268,12 +318,16 @@ function convertToCompletionsSSE(eventType, eventData) {
     }
     
     case 'response.completed': {
-      // 响应完成 → finish_reason: stop + [DONE]
+      // 响应完成 → 判断是否有 function_call 输出
+      const output = eventData.response?.output || [];
+      const hasFunctionCall = output.some(item => item.type === 'function_call');
+      const finishReason = hasFunctionCall ? 'tool_calls' : 'stop';
+      
       const finalData = {
         id: eventData.response?.id || 'resp-' + Date.now(),
         choices: [{
           delta: { content: '', tool_calls: null },
-          finish_reason: 'stop',
+          finish_reason: finishReason,
           index: 0,
         }],
       };
@@ -286,10 +340,63 @@ function convertToCompletionsSSE(eventType, eventData) {
       return null; // 返回 null，让调用方用 sendErrorSSE 处理
     }
     
+    case 'response.output_item.added': {
+      // 新增输出项 —— 如果是 function_call，发送 tool_calls 开始信息
+      if (eventData.item?.type === 'function_call') {
+        const converted = {
+          id: eventData.response_id || 'resp-' + Date.now(),
+          choices: [{
+            delta: {
+              content: null,
+              tool_calls: [{
+                index: eventData.output_index || 0,
+                id: eventData.item.call_id || 'call-' + Date.now(),
+                type: 'function',
+                function: {
+                  name: eventData.item.name || '',
+                  arguments: '',
+                },
+              }],
+            },
+            finish_reason: null,
+            index: 0,
+          }],
+        };
+        return `data: ${JSON.stringify(converted)}\n\n`;
+      }
+      return null;
+    }
+
+    case 'response.function_call_arguments.delta': {
+      // function call 参数增量
+      const converted = {
+        id: eventData.response_id || 'resp-' + Date.now(),
+        choices: [{
+          delta: {
+            content: null,
+            tool_calls: [{
+              index: eventData.output_index || 0,
+              function: {
+                arguments: eventData.delta || '',
+              },
+            }],
+          },
+          finish_reason: null,
+          index: 0,
+        }],
+      };
+      return `data: ${JSON.stringify(converted)}\n\n`;
+    }
+
+    case 'response.function_call_arguments.done': {
+      // function call 参数完成 → finish_reason: tool_calls
+      // 注意：不在这里发 finish_reason，等 response.completed 统一处理
+      return null;
+    }
+
     // 忽略的事件类型（不影响聊天显示）
     case 'response.created':
     case 'response.in_progress':
-    case 'response.output_item.added':
     case 'response.output_item.done':
     case 'response.content_part.added':
     case 'response.content_part.done':

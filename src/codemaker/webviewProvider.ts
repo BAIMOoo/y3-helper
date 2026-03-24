@@ -316,7 +316,7 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        console.log(`[CodeMaker] TOOL_CALL: ${tool_name}, id: ${tool_id}, params:`, JSON.stringify(tool_params).substring(0, 500));
+        console.log(`[CodeMaker] TOOL_CALL: ${tool_name}, id: ${tool_id}`);
 
         try {
             let result: any;
@@ -375,7 +375,6 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
                     break;
             }
 
-            console.log(`[CodeMaker] TOOL_CALL_RESULT: tool=${tool_name}, isError=${result?.isError}, content.length=${result?.content?.length || 0}`);
             this.sendMessage({
                 type: 'TOOL_CALL_RESULT',
                 data: {
@@ -639,11 +638,9 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
      */
     private async _toolEditFile(params: any): Promise<any> {
         try {
-            console.log('[CodeMaker] edit_file params:', JSON.stringify(params).substring(0, 500));
             const targetFile = params?.target_file || params?.path;
             const codeEdit = params?.code_edit ?? params?.content ?? '';
             const isCreateFile = params?.is_create_file || false;
-            console.log(`[CodeMaker] edit_file: target=${targetFile}, codeEdit.length=${codeEdit.length}, isCreate=${isCreateFile}`);
             if (!targetFile) {
                 return { content: 'Error: target_file is required.', isError: true, path: '' };
             }
@@ -815,8 +812,6 @@ Provide the complete updated code.`;
                 return { content: 'Error: target_file is required.', isError: true, path: '' };
             }
             const absolutePath = this._resolvePath(targetFile);
-            console.log(`[CodeMaker] replace_in_file: target=${targetFile}, absolutePath=${absolutePath}, isCreate=${isCreateFile}`);
-            console.log(`[CodeMaker] replace_in_file diff: ${replaceSnippet.substring(0, 300)}`);
             const fsModule = require('fs');
             const fileExist = fsModule.existsSync(absolutePath);
             let currentContent = '';

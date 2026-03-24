@@ -9,4 +9,5 @@
 98388,2026/3/20,112,112,王一鑫,d7e99b1,1,lua-static-check-mcp-98388,基于LSP的lua代码的静态检查逻辑+通过MCP调用vscodeOperator_readProblems获取Lua诊断信息
 98275,2026/3/23,1600,1600,王浩辰,,1,fix-codemaker-webview-message-handlers,修复CodeMaker集成WebView消息处理:@附加文件+TOOL_CALL+聊天无响应+Rules/MCP配置+API端口冲突+60+消息处理器移植
 98275,2026/3/23,1300,1300,王浩辰,,1,feat-mcp-server-connection-98275,实现MCP Server的实际连接(McpHub)+stdio/sse/streamableHttp传输+UI状态同步+use_mcp_tool调用+配置热更新
-98275,2026/3/24,800,800,王浩辰,,1,fix-toolcall-file-edit-and-terminal,修复TOOL_CALL文件编辑全链路:补齐16个工具+replace_in_file三层匹配引擎+apply API智能合并+ACCEPT_EDIT换行符冲突+终端命令terminalStatus+写磁盘时序修正
+98275,2026/3/24,800,800,王浩辰,,1,fix-toolcall-file-edit-and-terminal,修复TOOL_CALL文件编辑全链路:补齐16个工具+replace_in_file三层匹配引擎+apply API智能合并+终端命令terminalStatus
+98275,2026/3/24,500,500,王浩辰,,1,fix-accept-edit-and-responses-api,ACCEPT_EDIT对齐源码版EditApplyProvider(Document API写入+重复应用检测+空白冲突比较)+Responses API支持function calling(tools转换+tool_call事件+call_id格式)
