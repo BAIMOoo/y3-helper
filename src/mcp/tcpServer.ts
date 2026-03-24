@@ -5,6 +5,9 @@ import * as crypto from 'crypto';
 import * as tools from '../tools';
 import { getTCPConfig, TCPRequest, TCPResponse } from './types';
 import { GameSessionManager } from './gameSessionManager';
+import { define } from '../customDefine';
+import type { UINode } from '../customDefine/ui';
+import * as envImport from '../env';
 
 // MCP Streamable HTTP 端口
 const MCP_HTTP_PORT = 8766;
@@ -29,6 +32,18 @@ export class TCPServer extends vscode.Disposable {
     private sessionManager: GameSessionManager;
     private connections: Set<net.Socket> = new Set();
     private mcpSessions: Map<string, MCPSession> = new Map();
+
+    private readonly UI_TYPE_NAMES: Record<number, string> = {
+        1: 'Button',
+        3: 'TextLabel',
+        4: 'Image',
+        5: 'Progress',
+        7: 'Layout',
+        10: 'ScrollView',
+        18: 'Buff',
+        27: 'Chat_Box',
+        38: 'Sequence_Animation',
+    };
 
     constructor() {
         super(() => this.dispose());
@@ -301,13 +316,13 @@ export class TCPServer extends vscode.Disposable {
                         { name: 'stop_game', description: '停止游戏', inputSchema: { type: 'object', properties: {} } },
                         { name: 'get_logs', description: '获取游戏日志', inputSchema: { type: 'object', properties: { limit: { type: 'number' } } } },
                         { name: 'capture_screenshot', description: '截图', inputSchema: { type: 'object', properties: {} } },
-                        { 
-                            name: 'read_problems_lua', 
-                            description: '检查 Lua 文件', 
-                            inputSchema: { 
-                                type: 'object', 
-                                properties: { 
-                                    pathGlob: { 
+                        {
+                            name: 'read_problems_lua',
+                            description: '检查 Lua 文件',
+                            inputSchema: {
+                                type: 'object',
+                                properties: {
+                                    pathGlob: {
                                         oneOf: [
                                             { type: 'string', description: '单个路径过滤模式，如 "maps/EntryMap" 或 "src/main.lua"' },
                                             { type: 'array', items: { type: 'string' }, description: '多个路径过滤模式列表' }
@@ -315,7 +330,24 @@ export class TCPServer extends vscode.Disposable {
                                         description: '路径过滤模式（glob 格式），会自动添加 **/*.lua 后缀。默认检查所有 Lua 文件'
                                     }
                                 }
-                            } 
+                            }
+                        },
+                        {
+                            name: 'get_ui_canvas',
+                            description: '获取当前地图的 UI 画板结构，以树形文本返回画板中所有控件的层级关系（name、控件类型、uid）。无需游戏运行，只需地图已加载。默认只展开第一层子节点（depth=1），可通过 nodePath 定位到具体节点、通过 depth 控制展开深度。',
+                            inputSchema: {
+                                type: 'object',
+                                properties: {
+                                    nodePath: {
+                                        type: 'string',
+                                        description: '用点分隔的节点路径，第一段为画板名，如 "MainUI" 或 "MainUI.Panel_Root.Btn_Start"。不传则返回所有画板。'
+                                    },
+                                    depth: {
+                                        type: 'number',
+                                        description: '从目标节点展开的层数。depth=0 只返回目标节点自身，depth=1 包含直接子节点，以此类推。默认为 1。传 -1 返回完整树。'
+                                    }
+                                }
+                            }
                         }
                     ]
                 }
@@ -354,6 +386,80 @@ export class TCPServer extends vscode.Disposable {
                     case 'read_problems_lua':
                         result = await this.sessionManager.readProblemsLua(toolArgs);
                         break;
+                    case 'get_ui_canvas': {
+                        const nodePath: string | undefined = toolArgs.nodePath;
+                        let depth: number | undefined = 1; // 默认展开第一层
+                        if (toolArgs.depth !== undefined) {
+                            const rawDepth = Number(toolArgs.depth);
+                            if (!isNaN(rawDepth)) {
+                                depth = rawDepth === -1 ? undefined : Math.max(0, Math.floor(rawDepth));
+                            }
+                        }
+
+                        if (!envImport.env.currentMap) {
+                            result = {
+                                success: false,
+                                error: '当前没有已加载的地图，请先在 VSCode 中打开 Y3 地图项目'
+                            };
+                            break;
+                        }
+
+                        try {
+                            const uiPackage = await define(envImport.env.currentMap).界面.getUIPackage();
+
+                            // 路径模式：在画板中查找指定节点
+                            if (nodePath !== undefined) {
+                                const segments = nodePath.split('.');
+                                let target: UINode | undefined;
+
+                                for (const canvas of uiPackage.画板) {
+                                    if (canvas.name === segments[0]) {
+                                        if (segments.length === 1) {
+                                            target = canvas;
+                                        } else {
+                                            target = this.findNodeByPath(canvas.childs ?? [], segments.slice(1));
+                                        }
+                                        if (target) break;
+                                    }
+                                }
+
+                                if (!target) {
+                                    result = { success: false, error: `未找到路径: ${nodePath}` };
+                                    break;
+                                }
+
+                                const canvas = this.formatNodeTree(target, '', true, depth);
+                                result = { success: true, canvas };
+                                break;
+                            }
+
+                            // 全量模式：返回所有画板
+                            const lines: string[] = [];
+                            if (uiPackage.画板.length === 0) {
+                                lines.push('画板: (无)');
+                            } else {
+                                for (const node of uiPackage.画板) {
+                                    lines.push(`画板: ${node.name}`);
+                                    const childs: UINode[] = node.childs ?? [];
+                                    childs.forEach((child: UINode, i: number) => {
+                                        lines.push(this.formatNodeTree(child, '', i === childs.length - 1, depth));
+                                    });
+                                    lines.push('');
+                                }
+                            }
+
+                            result = {
+                                success: true,
+                                canvas: lines.join('\n').trimEnd()
+                            };
+                        } catch (err) {
+                            result = {
+                                success: false,
+                                error: `读取 UI 数据失败: ${err instanceof Error ? err.message : String(err)}`
+                            };
+                        }
+                        break;
+                    }
                     default:
                         return {
                             jsonrpc: '2.0',
@@ -484,6 +590,57 @@ export class TCPServer extends vscode.Disposable {
                 }
             };
         }
+    }
+
+    /**
+     * 按路径数组递归查找 UI 节点
+     * @param nodes 当前层级的节点列表
+     * @param pathSegments 剩余路径段（外部调用时保证长度 >= 1；此处防御内部递归的边界情况）
+     */
+    private findNodeByPath(nodes: UINode[], pathSegments: string[]): UINode | undefined {
+        if (pathSegments.length === 0) return undefined;
+        const [head, ...rest] = pathSegments;
+        const found = nodes.find(n => n.name === head);
+        if (!found) return undefined;
+        if (rest.length === 0) return found;
+        return this.findNodeByPath(found.childs ?? [], rest);
+    }
+
+    /**
+     * 递归将 UI Node 树格式化为类文件树的文本
+     * @param node UI 节点
+     * @param prefix 当前行前缀（用于绘制树形线条）
+     * @param isLast 是否是父节点的最后一个子节点
+     * @param maxDepth 最大展开深度（undefined 表示不限制）
+     * @param currentDepth 当前深度
+     */
+    private formatNodeTree(
+        node: UINode,
+        prefix: string = '',
+        isLast: boolean = true,
+        maxDepth?: number,
+        currentDepth: number = 0
+    ): string {
+        const connector = isLast ? '└── ' : '├── ';
+        const typeName = this.UI_TYPE_NAMES[node.type] ?? `type_${node.type}`;
+        const line = `${prefix}${connector}${node.name} [${typeName}] (uid: ${node.uid})`;
+
+        if (maxDepth !== undefined && currentDepth >= maxDepth) {
+            const childCount = (node.childs ?? []).length;
+            if (childCount > 0) {
+                const childPrefix = prefix + (isLast ? '    ' : '│   ');
+                return [line, `${childPrefix}... (${childCount} 个子节点)`].join('\n');
+            }
+            return line;
+        }
+
+        const childPrefix = prefix + (isLast ? '    ' : '│   ');
+        const childs: UINode[] = node.childs ?? [];
+        const childLines = childs.map((child: UINode, i: number) =>
+            this.formatNodeTree(child, childPrefix, i === childs.length - 1, maxDepth, currentDepth + 1)
+        );
+
+        return [line, ...childLines].join('\n');
     }
 
     /**
