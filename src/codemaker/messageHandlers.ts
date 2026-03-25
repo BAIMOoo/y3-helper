@@ -433,11 +433,7 @@ export async function handleExtendedMessage(
         }
 
         case 'GET_SKILLS': {
-            // 简化：返回空技能列表
-            provider.sendMessage({
-                type: 'SYNC_SKILLS',
-                data: [],
-            });
+            await handleGetSkills(provider);
             return true;
         }
 
@@ -456,9 +452,13 @@ export async function handleExtendedMessage(
             return true;
         }
 
-        case 'CREATE_SKILL_TEMPLATE':
+        case 'CREATE_SKILL_TEMPLATE': {
+            await handleCreateSkillTemplate(message.data, provider);
+            return true;
+        }
+
         case 'INSTALL_BUILTIN_SKILL': {
-            // 简化：不支持
+            await handleInstallBuiltinSkill(message.data, provider);
             return true;
         }
 
@@ -1505,6 +1505,224 @@ async function handleDeleteRule(data: any, provider: CodeMakerWebviewProvider) {
         await fs.promises.unlink(filePath);
         // 删除后自动刷新 Rules 列表
         await handleGetRules(provider);
+    }
+}
+
+// ─── Skills 相关 ─────────────────────────────────────────
+
+/**
+ * 解析 skill .md 文件格式
+ * 格式与 .mdc 类似：
+ * ---
+ * name: skill-name
+ * description: 描述
+ * ---
+ * 内容
+ */
+function parseSkillFile(raw: string, fileName: string): { name: string; description: string; content: string } {
+    const result = {
+        name: path.basename(fileName, '.md'),
+        description: '',
+        content: raw,
+    };
+    const frontMatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+    if (frontMatterMatch) {
+        const meta = frontMatterMatch[1];
+        result.content = frontMatterMatch[2];
+        const nameMatch = meta.match(/name:\s*(.+)/);
+        if (nameMatch) { result.name = nameMatch[1].trim(); }
+        const descMatch = meta.match(/description:\s*(.+)/);
+        if (descMatch) { result.description = descMatch[1].trim(); }
+    }
+    return result;
+}
+
+interface SkillInfo {
+    name: string;
+    description: string;
+    content: string;
+    source: string;
+    path: string;
+}
+
+/**
+ * 从指定目录加载所有 skill 文件
+ * 支持两种结构：
+ *   1. skills/*.md         — 直接放在根目录的 skill 文件
+ *   2. skills/<name>/SKILL.md — 子目录形式的 skill（源码版格式）
+ */
+export async function loadSkillsFromDir(dir: string, source: string): Promise<SkillInfo[]> {
+    const skills: SkillInfo[] = [];
+    try {
+        if (!fs.existsSync(dir)) { return skills; }
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            try {
+                if (entry.isFile() && entry.name.endsWith('.md')) {
+                    // 情况 1：根目录下的 .md 文件
+                    const filePath = path.join(dir, entry.name);
+                    const raw = await fs.promises.readFile(filePath, 'utf-8');
+                    const parsed = parseSkillFile(raw, entry.name);
+                    skills.push({
+                        name: parsed.name,
+                        description: parsed.description,
+                        content: parsed.content,
+                        source: source,
+                        path: filePath,
+                    });
+                } else if (entry.isDirectory()) {
+                    // 情况 2：子目录下的 SKILL.md
+                    const skillMdPath = path.join(dir, entry.name, 'SKILL.md');
+                    if (fs.existsSync(skillMdPath)) {
+                        const raw = await fs.promises.readFile(skillMdPath, 'utf-8');
+                        const parsed = parseSkillFile(raw, entry.name + '.md');
+                        skills.push({
+                            name: parsed.name,
+                            description: parsed.description,
+                            content: parsed.content,
+                            source: source,
+                            path: skillMdPath,
+                        });
+                    }
+                }
+            } catch {
+                // 解析失败的文件静默跳过
+            }
+        }
+    } catch {
+        // 目录读取错误静默跳过
+    }
+    return skills;
+}
+
+/**
+ * 获取项目 skills 目录下的所有 skills
+ */
+async function handleGetSkills(provider: CodeMakerWebviewProvider) {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+        provider.sendMessage({ type: 'SYNC_SKILLS', data: [] });
+        return;
+    }
+
+    const skillsDir = path.join(workspaceFolder.uri.fsPath, '.codemaker', 'skills');
+    const skills = await loadSkillsFromDir(skillsDir, 'codemaker-project');
+
+    provider.sendMessage({ type: 'SYNC_SKILLS', data: skills });
+}
+
+/**
+ * 创建 skill 模板文件
+ */
+async function handleCreateSkillTemplate(data: any, provider: CodeMakerWebviewProvider) {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+        provider.sendMessage({
+            type: 'CREATE_SKILL_TEMPLATE_RESULT',
+            data: { success: false, message: 'No workspace folder found' },
+        });
+        return;
+    }
+
+    const skillsDir = path.join(workspaceFolder.uri.fsPath, '.codemaker', 'skills');
+    await fs.promises.mkdir(skillsDir, { recursive: true });
+
+    const templateContent = data?.templateContent || '---\nname: template-skill\ndescription: Replace with description of the skill and when Codemaker should use it.\n---\n\n# Insert instructions below\n';
+
+    // 文件名去重：new-skill.md, new-skill-1.md, new-skill-2.md...
+    let fileName = 'new-skill.md';
+    let filePath = path.join(skillsDir, fileName);
+    let counter = 1;
+    while (fs.existsSync(filePath)) {
+        fileName = `new-skill-${counter}.md`;
+        filePath = path.join(skillsDir, fileName);
+        counter++;
+    }
+
+    try {
+        await fs.promises.writeFile(filePath, templateContent, 'utf-8');
+
+        // 返回结果（前端收到 path 后会自己发 OPEN_FILE 打开文件）
+        provider.sendMessage({
+            type: 'CREATE_SKILL_TEMPLATE_RESULT',
+            data: { success: true, path: filePath },
+        });
+
+        // 创建后自动刷新 skills 列表
+        await handleGetSkills(provider);
+    } catch (err: any) {
+        provider.sendMessage({
+            type: 'CREATE_SKILL_TEMPLATE_RESULT',
+            data: { success: false, message: err?.message || 'Failed to create skill template' },
+        });
+    }
+}
+
+/**
+ * 安装内置 skill（从 URL 下载）
+ */
+async function handleInstallBuiltinSkill(data: any, provider: CodeMakerWebviewProvider) {
+    const { skillName, downloadUrl } = data || {};
+
+    if (!skillName || !downloadUrl) {
+        provider.sendMessage({
+            type: 'INSTALL_BUILTIN_SKILL_RESULT',
+            data: { success: false, error: 'Missing skillName or downloadUrl' },
+        });
+        return;
+    }
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+        provider.sendMessage({
+            type: 'INSTALL_BUILTIN_SKILL_RESULT',
+            data: { success: false, error: 'No workspace folder found' },
+        });
+        return;
+    }
+
+    const skillsDir = path.join(workspaceFolder.uri.fsPath, '.codemaker', 'skills');
+    await fs.promises.mkdir(skillsDir, { recursive: true });
+
+    const filePath = path.join(skillsDir, `${skillName}.md`);
+
+    try {
+        // 使用 Node.js 内置 http/https 模块下载
+        const content = await new Promise<string>((resolve, reject) => {
+            const mod = downloadUrl.startsWith('https') ? require('https') : require('http');
+            const req = mod.get(downloadUrl, { timeout: 30000 }, (res: any) => {
+                if (res.statusCode !== 200) {
+                    reject(new Error(`HTTP ${res.statusCode}`));
+                    res.resume();
+                    return;
+                }
+                let body = '';
+                res.setEncoding('utf-8');
+                res.on('data', (chunk: string) => { body += chunk; });
+                res.on('end', () => { resolve(body); });
+            });
+            req.on('error', reject);
+            req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+        });
+
+        await fs.promises.writeFile(filePath, content, 'utf-8');
+
+        provider.sendMessage({
+            type: 'INSTALL_BUILTIN_SKILL_RESULT',
+            data: {
+                success: true,
+                skillName: skillName,
+                installPath: `.codemaker/skills/${skillName}.md`,
+            },
+        });
+
+        // 安装后自动刷新 skills 列表
+        await handleGetSkills(provider);
+    } catch (err: any) {
+        provider.sendMessage({
+            type: 'INSTALL_BUILTIN_SKILL_RESULT',
+            data: { success: false, error: err?.message || 'Download failed' },
+        });
     }
 }
 

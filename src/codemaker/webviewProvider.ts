@@ -3,7 +3,11 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getCodeMakerConfig } from './configProvider';
-import { handleExtendedMessage } from './messageHandlers';
+import { handleExtendedMessage, loadSkillsFromDir } from './messageHandlers';
+import { getWorkspaceTracker } from './handlers/workspaceTracker';
+import { getOpenFilesHandler } from './handlers/openFilesHandler';
+import { isDocsetFile } from './utils/file';
+import { readFileSync } from 'fs';
 import { initMcpHub, getMcpHub, disposeMcpHub } from './mcpHandlers/index';
 
 /**
@@ -152,9 +156,10 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
                 break;
             }
             case 'GET_WORKSPACE_FILES': {
+                // 源码版 GET_WORKSPACE_FILES 实际调用 searchWorkspacePath（带 folderDisabled: true）
                 const keyword: string = message.data?.keyword ?? '';
                 const max: number = message.data?.max ?? 50;
-                this._searchWorkspaceFiles(keyword, max).then(files => {
+                this._searchWorkspacePaths(keyword, max, message.data?.type, true).then(files => {
                     this.sendMessage({
                         type: 'WORKSPACE_FILES',
                         data: files,
@@ -932,14 +937,52 @@ Provide the complete updated code.`;
     }
 
     /**
-     * use_skill 工具：暂不支持，返回提示
+     * use_skill 工具：加载 skill 内容并返回给 AI
      */
     private async _toolUseSkill(params: any): Promise<any> {
-        const skillName = params?.skill_name || 'unknown';
+        const skillName = params?.skill_name;
+
+        if (!skillName) {
+            return {
+                content: 'Error: skill_name parameter is required.',
+                path: '',
+                isError: true,
+            };
+        }
+
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            return {
+                content: `Error: No workspace folder found.`,
+                path: skillName,
+                isError: true,
+            };
+        }
+
+        // 动态从文件系统加载最新 skills（不使用缓存）
+        const skillsDir = path.join(workspaceFolder.uri.fsPath, '.codemaker', 'skills');
+        const skills = await loadSkillsFromDir(skillsDir, 'codemaker-project');
+
+        const skill = skills.find(s => s.name === skillName);
+        if (!skill) {
+            const available = skills.map(s => s.name).join(', ') || '(none)';
+            return {
+                content: `Error: Skill "${skillName}" not found. Available skills: ${available}`,
+                path: skillName,
+                isError: true,
+            };
+        }
+
+        // 返回 JSON 格式，匹配前端 parseSkillToolResult 期望
         return {
-            content: `Skill "${skillName}" is not yet supported in Y3Helper integration.`,
-            path: skillName,
-            isError: true,
+            content: JSON.stringify({
+                name: skill.name,
+                content: skill.content,
+                source: skill.source,
+                path: skill.path,
+            }),
+            path: skill.path,
+            isError: false,
         };
     }
 
@@ -1063,170 +1106,114 @@ Provide the complete updated code.`;
     // ─────────────────────────────────────────────
 
     /**
-     * 搜索工作区文件（用于 GET_WORKSPACE_FILES）
-     * 返回匹配关键字的文件列表，当前打开的文件标记 isActive
+     * 搜索工作区路径（用于 SEARCH_WORKSPACE_PATH / GET_WORKSPACE_FILES）
+     * 完全移植自源码版 searchWorkspacePath.ts
      */
-    private async _searchWorkspaceFiles(keyword: string, max: number): Promise<any[]> {
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
-            return [];
-        }
-
-        const activeFilePath = vscode.window.activeTextEditor?.document.fileName;
-        const openFilePaths = new Set(
-            vscode.workspace.textDocuments
-                .filter(doc => !doc.isUntitled)
-                .map(doc => doc.fileName)
-        );
-
-        // 使用 glob 模式搜索文件
-        const pattern = keyword
-            ? `**/*${keyword}*`
-            : '**/*';
-
-        const excludePattern = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.DS_Store}';
-
+    private async _searchWorkspacePaths(keyword: string, max: number, type?: string, folderDisabled?: boolean): Promise<any[]> {
         try {
-            const uris = await vscode.workspace.findFiles(pattern, excludePattern, max * 3);
-
-            const results: any[] = [];
-            for (const uri of uris) {
-                const relativePath = vscode.workspace.asRelativePath(uri, false);
-                const fileName = path.basename(uri.fsPath);
-
-                // 如果有关键字，进行更精确的过滤
-                if (keyword && !relativePath.toLowerCase().includes(keyword.toLowerCase())) {
-                    continue;
-                }
-
-                const isActive = uri.fsPath === activeFilePath || openFilePaths.has(uri.fsPath);
-
-                results.push({
-                    path: relativePath.replace(/\\/g, '/'),
-                    fileName: fileName,
-                    isActive: isActive,
-                });
-
-                if (results.length >= max) {
-                    break;
-                }
-            }
-
-            // 将活动文件排在前面
-            results.sort((a, b) => {
-                if (a.isActive && !b.isActive) { return -1; }
-                if (!a.isActive && b.isActive) { return 1; }
-                return 0;
+            const workspaceTracker = getWorkspaceTracker();
+            const filePaths = workspaceTracker.getFilePaths({
+                keyword,
+                type
             });
+            const slicedFilePaths = filePaths.slice(0, max);
+            const activedDocument = vscode.window.activeTextEditor?.document;
+            const result: any[] = [];
+            let hasActiveFilePath = false;
+            let hasPreviewFile = false;
+            let uniqueFilePaths: string[] = [];
 
-            return results;
-        } catch (e) {
-            console.error('[CodeMaker] Error searching workspace files:', e);
-            return [];
-        }
-    }
+            if (!keyword) {
+                // 补充最近打开的文件（源码版 L30-41）
+                const openFiles = getOpenFilesHandler()?.getRecentlyOpenedTop(10) || [];
+                const openFilesPaths = openFiles.map((file: any) => file.relative_path || file.path);
+                ([openFilesPaths, slicedFilePaths].flat()).forEach((filePath: string) => {
+                    if (!uniqueFilePaths.includes(filePath)) {
+                        uniqueFilePaths.push(filePath);
+                    }
+                });
+            } else {
+                uniqueFilePaths = slicedFilePaths;
+            }
 
-    /**
-     * 搜索工作区路径（用于 SEARCH_WORKSPACE_PATH）
-     * 支持按 file / folder 类型过滤
-     * 目录路径以 "/" 结尾，文件路径不带结尾斜杠
-     */
-    private async _searchWorkspacePaths(keyword: string, max: number, type?: string): Promise<any[]> {
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
-            return [];
-        }
-
-        const activeFilePath = vscode.window.activeTextEditor?.document.fileName;
-        const results: any[] = [];
-
-        if (type === 'folder' || !type) {
-            // 搜索目录：通过搜索目录下的任意文件来发现目录
-            const dirPattern = keyword
-                ? `**/*${keyword}*/**`
-                : '**/*';
-            const excludePattern = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.DS_Store}';
-
-            try {
-                const uris = await vscode.workspace.findFiles(dirPattern, excludePattern, 500);
-                const dirSet = new Set<string>();
-
-                for (const uri of uris) {
-                    const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
-                    // 收集所有中间目录
-                    const parts = relativePath.split('/');
-                    let dirPath = '';
-                    for (let i = 0; i < parts.length - 1; i++) {
-                        dirPath = dirPath ? `${dirPath}/${parts[i]}` : parts[i];
-                        if (keyword) {
-                            if (dirPath.toLowerCase().includes(keyword.toLowerCase())) {
-                                dirSet.add(dirPath);
-                            }
+            for (const filePath of uniqueFilePaths) {
+                if (filePath.endsWith('/') && !folderDisabled) {
+                    // 目录处理（源码版 L44-63）
+                    const absolutePath = path.resolve(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', filePath);
+                    const uri = vscode.Uri.file(absolutePath);
+                    try {
+                        const entities = await vscode.workspace.fs.readDirectory(uri);
+                        const pathList = entities.reduce((prev: string, current: [string, vscode.FileType]) => {
+                            let next = prev;
+                            if (next) { next += '\n'; }
+                            next += filePath + current[0];
+                            return next;
+                        }, '');
+                        result.push({
+                            path: filePath,
+                            fileName: path.basename(filePath),
+                            content: pathList
+                        });
+                    } catch {
+                        workspaceTracker.removeFilePath(filePath);
+                    }
+                } else {
+                    // 文件处理（源码版 L65-97）
+                    try {
+                        const absolutePath = path.resolve(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', filePath);
+                        const uri = vscode.Uri.file(absolutePath);
+                        await vscode.workspace.fs.stat(uri);
+                        let content: Buffer | string = '';
+                        if (isDocsetFile(absolutePath)) {
+                            content = readFileSync(absolutePath).toString('base64');
                         } else {
-                            dirSet.add(dirPath);
+                            const document = await vscode.workspace.openTextDocument(uri);
+                            content = document.getText() || '';
                         }
-                    }
-                }
 
-                for (const dir of dirSet) {
-                    const dirName = path.basename(dir);
-                    results.push({
-                        path: dir + '/',  // 目录以 "/" 结尾
-                        fileName: dirName,
-                        isActive: false,
-                    });
-                    if (type === 'folder' && results.length >= max) {
-                        break;
+                        hasPreviewFile = true;
+                        if (activedDocument?.uri?.path === absolutePath || activedDocument?.uri?.fsPath === absolutePath) {
+                            hasActiveFilePath = true;
+                            result.unshift({
+                                path: filePath,
+                                fileName: path.basename(filePath),
+                                content: content,
+                                isActive: true,
+                            });
+                        } else {
+                            result.push({
+                                path: filePath,
+                                fileName: path.basename(filePath),
+                                content: content,
+                            });
+                        }
+                    } catch {
+                        workspaceTracker.removeFilePath(filePath);
                     }
                 }
-            } catch (e) {
-                console.error('[CodeMaker] Error searching workspace folders:', e);
             }
-        }
 
-        if (type === 'file' || !type) {
-            // 搜索文件
-            const filePattern = keyword
-                ? `**/*${keyword}*`
-                : '**/*';
-            const excludePattern = '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/.DS_Store}';
-
-            try {
-                const uris = await vscode.workspace.findFiles(filePattern, excludePattern, max * 3);
-
-                for (const uri of uris) {
-                    const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
-                    const fileName = path.basename(uri.fsPath);
-
-                    if (keyword && !relativePath.toLowerCase().includes(keyword.toLowerCase())) {
-                        continue;
-                    }
-
-                    const isActive = uri.fsPath === activeFilePath;
-
-                    results.push({
-                        path: relativePath,
-                        fileName: fileName,
-                        isActive: isActive,
+            // 源码版关键兜底修复（L99-113）：如果当前活动文件不在结果中，强制插入到最前面
+            if (!keyword && !hasActiveFilePath && hasPreviewFile && activedDocument?.uri?.scheme === 'file') {
+                try {
+                    await vscode.workspace.fs.stat(activedDocument.uri);
+                    const absolutePath = activedDocument.uri.fsPath;
+                    result.unshift({
+                        path: vscode.workspace.asRelativePath(activedDocument.uri),
+                        fileName: path.basename(activedDocument.uri.path),
+                        content: isDocsetFile(activedDocument.uri.path)
+                            ? readFileSync(absolutePath).toString('base64')
+                            : (activedDocument.getText() || ''),
+                        isActive: true,
                     });
-
-                    if (results.length >= max) {
-                        break;
-                    }
-                }
-            } catch (e) {
-                console.error('[CodeMaker] Error searching workspace files:', e);
+                } catch { }
             }
+
+            return result;
+        } catch (e) {
+            console.error('[CodeMaker] Error searching workspace paths:', e);
+            return [];
         }
-
-        // 活动文件排在前面，截断到 max
-        results.sort((a, b) => {
-            if (a.isActive && !b.isActive) { return -1; }
-            if (!a.isActive && b.isActive) { return 1; }
-            return 0;
-        });
-
-        return results.slice(0, max);
     }
 
     // ─────────────────────────────────────────────

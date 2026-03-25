@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { CodeMakerWebviewProvider } from './webviewProvider';
 import { CodeMakerApiServer } from './apiServer';
+import { initOpenFilesHandler } from './handlers/openFilesHandler';
+import { initWorkspaceTracker } from './handlers/workspaceTracker';
 
 let webviewProvider: CodeMakerWebviewProvider | undefined;
 let apiServer: CodeMakerApiServer | undefined;
@@ -58,6 +60,10 @@ export function initCodeMaker(context: vscode.ExtensionContext) {
             }
         })
     );
+
+    // 初始化 workspaceTracker 和 openFilesHandler（与源码版一致：在 extension activate 时初始化）
+    initOpenFilesHandler(context);
+    initWorkspaceTracker();
 
     // 视图状态管理
     setupViewStateManagement(context);
