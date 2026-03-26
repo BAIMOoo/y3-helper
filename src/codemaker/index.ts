@@ -29,7 +29,7 @@ export function initCodeMaker(context: vscode.ExtensionContext) {
     const globalStoragePath = context.globalStorageUri.fsPath;
     apiServer = new CodeMakerApiServer(extensionUri, globalStoragePath);
 
-    // 启动 API Server
+    // 启动 API Server（完成后再自动展开面板，避免 iframe 在 Server 就绪前加载）
     startApiServer(context);
 
     // 注册打开命令
@@ -65,19 +65,11 @@ export function initCodeMaker(context: vscode.ExtensionContext) {
     initOpenFilesHandler(context);
     initWorkspaceTracker();
 
-    // 视图状态管理
-    setupViewStateManagement(context);
+    // 视图关闭状态管理（不涉及自动打开，可立即注册）
+    setupDisposeListener(context);
 }
 
-function setupViewStateManagement(context: vscode.ExtensionContext) {
-    // 首次启动自动展开到右侧
-    const userClosed = context.globalState.get<boolean>('codemaker.userClosed', false);
-    if (!userClosed) {
-        setTimeout(() => {
-            vscode.commands.executeCommand('codemaker.webview.focus');
-        }, 1500);
-    }
-
+function setupDisposeListener(context: vscode.ExtensionContext) {
     // 监听视图关闭
     if (webviewProvider) {
         const checkDispose = () => {
@@ -100,6 +92,12 @@ async function startApiServer(context: vscode.ExtensionContext) {
             webviewProvider.setApiServerPort(port);
         }
         console.log(`[CodeMaker] API Server started on port ${port}`);
+
+        // API Server 就绪后，再自动展开面板（避免 iframe 在 Server 启动前加载导致"请重新连接"）
+        const userClosed = context.globalState.get<boolean>('codemaker.userClosed', false);
+        if (!userClosed) {
+            vscode.commands.executeCommand('codemaker.webview.focus');
+        }
     } catch (err) {
         console.error('[CodeMaker] Failed to start API Server:', err);
         vscode.window.showErrorMessage(`CodeMaker API Server 启动失败: ${err}`);
