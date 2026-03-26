@@ -8,7 +8,7 @@
 
 ### 方式一：从 GitHub Release 下载
 
-1. 访问 [Releases 页面](https://github.com/BAIMOoo/y3-helper/releases)
+1. 访问 [Releases 页面](https://github.com/y3-editor/y3-helper/releases)
 2. 下载最新版本的 `.vsix` 文件
 3. 在 VSCode 中按 `Ctrl+Shift+P`，输入 `Extensions: Install from VSIX...`
 4. 选择下载的 `.vsix` 文件进行安装
@@ -16,7 +16,7 @@
 ### 方式二：从源码构建
 
 ```bash
-git clone https://github.com/BAIMOoo/y3-helper.git
+git clone https://github.com/y3-editor/y3-helper.git
 cd y3-helper
 npm install
 npm run vscode:prepublish
