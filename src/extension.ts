@@ -215,7 +215,7 @@ class Helper {
 
                 // 打开项目
                 await this.context.globalState.update("NewProjectPath", scriptUri.fsPath);
-                await vscode.commands.executeCommand('vscode.openFolder', scriptUri);
+                await vscode.commands.executeCommand('vscode.openFolder', env.projectUri);
 
                 this.checkNewProject();
 
