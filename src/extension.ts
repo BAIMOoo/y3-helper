@@ -181,6 +181,17 @@ class Helper {
                     } catch {}
                 }
 
+                // 复制 y3-lualib 中的 .codemaker 到地图根目录（包含 skills、rules、knowledge、mcp_settings.json）
+                try {
+                    let codemakerSource = vscode.Uri.joinPath(y3Uri, '.codemaker');
+                    let codemakerTarget = vscode.Uri.joinPath(scriptUri, '..', '.codemaker');
+                    await vscode.workspace.fs.copy(codemakerSource, codemakerTarget, { overwrite: true });
+                    // 删除 y3-lualib 中的 .codemaker，只保留地图根目录下的
+                    await vscode.workspace.fs.delete(codemakerSource, { recursive: true });
+                } catch (e) {
+                    y3.log.warn(l10n.t('复制 .codemaker 目录失败: {0}', String(e)));
+                }
+
                 // 询问用户是否生成 UI 框架
                 const generateUI = l10n.t('✅ 确认生成');
                 const skipUI = l10n.t('跳过');
