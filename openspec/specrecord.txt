@@ -1,4 +1,4 @@
-﻿单号,归档时间,AI生成行数,总修改行数,提交人,SVN版本列表,提交次数,变更名称,备注
+ticket_id,archive_time,ai_lines,total_lines,author,svn_revisions,commit_count,change_name,note
 98274,2026/3/13,0,0,王浩辰,cba9d62,1,docs-vscode-plugin-learning-98274,学习VsCode插件开发流程(文档类)
 98336,2026/3/13,1748,1748,刘冰,832ae44;55ef730,2,feat-ui-framework-98336,UI框架加载重建与优化
 98276,2026/3/13,10,10,王一鑫,dbe1fc2;d6a0dce,2,project-level-workspace-global-script-98276,根据目录层级配置目标环境及global script路径选择
