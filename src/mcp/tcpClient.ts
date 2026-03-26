@@ -32,7 +32,7 @@ export class TCPClient {
             });
 
             this.socket.on('data', (data) => {
-                this.handleData(data);
+                this.handleData(data as Buffer);
             });
 
             this.socket.on('close', () => {

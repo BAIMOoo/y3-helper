@@ -25,7 +25,7 @@ export class ConsoleServer extends vscode.Disposable {
                 });
 
                 socket.on('data', (data) => {
-                    protocol.needDecode(data);
+                    protocol.needDecode(data as Buffer);
                 });
 
                 socket.on('close', () => {
