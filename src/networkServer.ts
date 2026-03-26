@@ -57,7 +57,7 @@ export class NetworkServer extends vscode.Disposable {
             let str = JSON.stringify(data);
             let len = Buffer.alloc(4);
             len.writeUInt32BE(str.length);
-            return Buffer.concat([len, Buffer.from(str)]);
+            return Buffer.concat([len, Buffer.from(str)]) as Buffer;
         }
         return net.createServer()
             .on('connection', (socket) => {
@@ -69,7 +69,7 @@ export class NetworkServer extends vscode.Disposable {
                     socket.write(packData({
                         count,
                         time: Date.now(),
-                    }));
+                    }) as Uint8Array);
                     if (count >= 10) {
                         clearInterval(timer);
                     }

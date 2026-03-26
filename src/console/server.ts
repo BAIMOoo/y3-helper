@@ -21,7 +21,7 @@ export class ConsoleServer extends vscode.Disposable {
 
                 let client = new Client((obj) => {
                     let data = protocol.encode(obj);
-                    socket.write(data);
+                    socket.write(data as Uint8Array);
                 });
 
                 socket.on('data', (data) => {

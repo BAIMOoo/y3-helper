@@ -9,7 +9,7 @@ export class Protocol {
     needDecode(data: Buffer) {
         //协议为定长的4字节头部+数据体json字符串
         //需要处理粘包和半包
-        this.buffer = Buffer.concat([this.buffer, data]);
+        this.buffer = Buffer.concat([this.buffer, data]) as Buffer;
         while (this.buffer.length >= 4) {
             let len = this.buffer.readUInt32BE(0);
             if (this.buffer.length < len + 4) {
@@ -32,6 +32,6 @@ export class Protocol {
         let len = Buffer.byteLength(content);
         let head = Buffer.alloc(4);
         head.writeUInt32BE(len, 0);
-        return Buffer.concat([head, Buffer.from(content)]);
+        return Buffer.concat([head, Buffer.from(content)]) as Buffer;
     }
 }
