@@ -11,3 +11,4 @@ src/
 node_modules
 out/
 webpack.config.json
+.worktrees/

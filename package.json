@@ -44,6 +44,13 @@
                     "id": "y3-helper.custom",
                     "name": "%自定义视图%"
                 }
+            ],
+            "codemaker-sidebar": [
+                {
+                    "type": "webview",
+                    "id": "codemaker.webview",
+                    "name": "CodeMaker AI"
+                }
             ]
         },
         "menus": {
@@ -163,6 +170,13 @@
                     "id": "y3-helper",
                     "title": "%Y3开发助手%",
                     "icon": "image/logo.png"
+                }
+            ],
+            "secondarySidebar": [
+                {
+                    "id": "codemaker-sidebar",
+                    "title": "CodeMaker",
+                    "icon": "$(hubot)"
                 }
             ]
         },
@@ -364,6 +378,16 @@
                 "command": "y3-helper.selectLaunchingMap",
                 "title": "选择启动地图",
                 "category": "%Y3开发助手%"
+            },
+            {
+                "command": "y3-helper.generateUIFramework",
+                "title": "生成UI框架",
+                "category": "%Y3开发助手%"
+            },
+            {
+                "command": "y3-helper.codemaker.open",
+                "title": "打开 CodeMaker",
+                "category": "%Y3开发助手%"
             }
         ],
         "configuration": {
@@ -414,6 +438,42 @@
                         "en"
                     ],
                     "scope": "resource"
+                },
+                "CodeMaker.CodeChatApiKey": {
+                    "title": "CodeMaker API Key",
+                    "description": "CodeMaker AI 聊天使用的 API Key",
+                    "type": "string",
+                    "default": "",
+                    "scope": "resource"
+                },
+                "CodeMaker.CodeChatApiBaseUrl": {
+                    "title": "CodeMaker API Base URL",
+                    "description": "CodeMaker AI 聊天使用的 API 基础地址",
+                    "type": "string",
+                    "default": "",
+                    "scope": "resource"
+                },
+                "CodeMaker.CodeChatModel": {
+                    "title": "CodeMaker 固定模型",
+                    "description": "填写后将锁定 CodeMaker 聊天模型为该值，不可在 UI 中切换。留空则允许用户自由选择。支持任意模型名称。",
+                    "type": "string",
+                    "default": "",
+                    "scope": "resource"
+                },
+                "CodeMaker.CodeChatWireApi": {
+                    "title": "CodeMaker API 协议",
+                    "description": "选择 API 通信协议。chat-completions: 标准 OpenAI Chat Completions API（默认，兼容大多数服务商）；responses: OpenAI Responses API（适用于 RightCode 等服务商）。",
+                    "type": "string",
+                    "enum": [
+                        "chat-completions",
+                        "responses"
+                    ],
+                    "enumDescriptions": [
+                        "Chat Completions API (POST /v1/chat/completions) - 兼容 LinkAPI、OneAPI 等大多数服务商",
+                        "Responses API (POST /v1/responses) - 适用于 RightCode 等使用新协议的服务商"
+                    ],
+                    "default": "chat-completions",
+                    "scope": "resource"
                 }
             }
         },
@@ -440,19 +500,26 @@
         ]
     },
     "extensionDependencies": [
-        "sumneko.lua"
+        "sumneko.lua",
+        "sumneko.vscode-operator"
     ],
     "icon": "image/logo.png",
     "scripts": {
-        "vscode:prepublish": "webpack --mode production",
+        "vscode:prepublish": "webpack --mode production && webpack --config webpack.mcp.config.js",
         "compile": "webpack --mode none",
+        "compile:mcp": "webpack --config webpack.mcp.config.js",
         "watch": "webpack --mode none --watch",
+        "watch:mcp": "webpack --config webpack.mcp.config.js --watch",
         "pretest": "npm run compile && npm run lint",
         "lint": "eslint src --ext ts",
         "test": "node ./out/test/runTest.js",
         "feasibility_test": "node ./out/test/feasibility.test.js"
     },
     "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.13.1",
+        "fast-deep-equal": "^3.1.3",
+        "zod": "^3.24.0",
+        "@msgpack/msgpack": "^3.1.3",
         "@vscode/l10n": "^0.0.18",
         "exceljs": "^4.4.0",
         "fast-xml-parser": "^4.3.5",
@@ -464,11 +531,8 @@
         "module-alias": "2.2.3",
         "os-locale": "^6.0.2",
         "uuid": "^9.0.1",
-        "winreg": "^1.2.5"
-    },
-    "overrides": {
-        "serialize-javascript": ">=7.0.3",
-        "diff": ">=8.0.3"
+        "winreg": "^1.2.5",
+        "zstd-codec": "^0.1.5"
     },
     "devDependencies": {
         "@types/fs-extra": "^11.0.4",
@@ -479,18 +543,18 @@
         "@types/uuid": "^9.0.8",
         "@types/vscode": "^1.96.0",
         "@types/winreg": "^1.2.34",
-        "@typescript-eslint/eslint-plugin": "^8.0.0",
-        "@typescript-eslint/parser": "^8.0.0",
+        "@typescript-eslint/eslint-plugin": "^6.9.0",
+        "@typescript-eslint/parser": "^6.9.0",
         "@vscode/dts": "^0.4.1",
         "@vscode/l10n-dev": "^0.0.35",
         "@vscode/test-electron": "^2.3.6",
         "dts-bundle-generator": "^9.5.1",
         "eslint": "^8.57.0",
         "glob": "^10.3.10",
-        "mocha": "^11.7.5",
-        "ts-loader": "^9.2.1",
+        "mocha": "^10.2.0",
+        "ts-loader": "^9.5.1",
         "tsconfig-paths-webpack-plugin": "^4.1.0",
-        "webpack": "^5.105.3",
+        "webpack": "^5.93.0",
         "webpack-cli": "^5.1.4"
     }
 }

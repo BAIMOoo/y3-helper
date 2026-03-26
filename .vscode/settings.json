@@ -12,4 +12,17 @@
         ".vscode",
         "3rd"
     ],
+    "workbench.colorCustomizations": {
+        "activityBar.background": "#1F2F3B",
+        "titleBar.activeBackground": "#2C4253",
+        "titleBar.activeForeground": "#FBFCFD",
+        "titleBar.inactiveBackground": "#1F2F3B",
+        "titleBar.inactiveForeground": "#FBFCFD",
+        "statusBar.background": "#1F2F3B",
+        "statusBar.foreground": "#FBFCFD",
+        "statusBar.debuggingBackground": "#1F2F3B",
+        "statusBar.debuggingForeground": "#FBFCFD",
+        "statusBar.noFolderBackground": "#1F2F3B",
+        "statusBar.noFolderForeground": "#FBFCFD"
+    },
 }

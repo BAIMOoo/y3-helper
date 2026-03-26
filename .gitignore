@@ -5,4 +5,8 @@ node_modules
 *.vsix
 *.log
 tmp
-dist
+docs
+.claude
+CLAUDE.md
+design
+.worktrees

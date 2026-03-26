@@ -7,6 +7,8 @@ moduleAlias.addAliases({
 import * as tools from "./tools";
 import * as vscode from 'vscode';
 import * as mainMenu from './mainMenu';
+import * as os from 'os';
+import * as path from 'path';
 
 import { env } from './env';
 import { runShell } from './runShell';
@@ -24,10 +26,14 @@ import { config } from './config';
 import * as globalScript from './globalScript';
 import * as luaLanguage from './luaLanguage';
 import * as ecaCompiler from './ecaCompiler';
+import * as uiFramework from './uiFramework';
 import * as l10n from '@vscode/l10n';
+import * as mcp from './mcp';
+import { initCodeMaker, stopCodeMaker } from './codemaker';
 
 class Helper {
     private context: vscode.ExtensionContext;
+    private tcpServer?: mcp.TCPServer;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
@@ -45,8 +51,8 @@ class Helper {
     private registerCommonCommands() {
         vscode.commands.registerCommand('y3-helper.selectAnotherMap', async () => {
             await env.updateMap(false, true);
-            if (!vscode.workspace.workspaceFolders?.some((folder) => folder.uri.fsPath === env.scriptUri?.fsPath)) {
-                vscode.commands.executeCommand('vscode.openFolder', env.scriptUri);
+            if (!vscode.workspace.workspaceFolders?.some((folder) => folder.uri.fsPath === env.projectUri?.fsPath)) {
+                vscode.commands.executeCommand('vscode.openFolder', env.projectUri);
             }
         });
         vscode.commands.registerCommand('y3-helper.shell', async (...args: any[]) => {
@@ -175,6 +181,27 @@ class Helper {
                     } catch {}
                 }
 
+                // 询问用户是否生成 UI 框架
+                const generateUI = l10n.t('✅ 确认生成');
+                const skipUI = l10n.t('跳过');
+                const uiChoice = await vscode.window.showWarningMessage(
+                    l10n.t('是否生成 UI 开发框架？'),
+                    { modal: true, detail: l10n.t('将在 global_script/game/ 目录下生成 UI 框架文件（UIManager、BasePanel、BaseView、BaseTips 等）。\n\n⚠️ 注意：不会修改 global_main.lua，但如果 game/ 目录下已有同名框架文件，将被覆盖。\n\n生成后需要在 global_main.lua 中手动添加 include \'game.init\' 来启用。') },
+                    generateUI,
+                    skipUI
+                );
+
+                if (uiChoice === generateUI) {
+                    try {
+                        await uiFramework.initUIFramework(this.context, progress);
+                        vscode.window.showInformationMessage(l10n.t('✅ UI 框架已生成到 global_script/ 目录'));
+                    } catch (error) {
+                        y3.log.warn(l10n.t('UI 框架初始化失败: {0}', String(error)));
+                    }
+                } else {
+                    y3.log.info(l10n.t('用户跳过了 UI 框架生成'));
+                }
+
                 // 打开项目
                 await this.context.globalState.update("NewProjectPath", scriptUri.fsPath);
                 await vscode.commands.executeCommand('vscode.openFolder', scriptUri);
@@ -262,6 +289,236 @@ class Helper {
         });
     }
 
+    private async startTCPServer(silent: boolean = false) {
+        try {
+            this.tcpServer = new mcp.TCPServer();
+            await this.tcpServer.start();
+            tools.log.info('[Y3-Helper] TCP Server started for MCP');
+        } catch (error) {
+            tools.log.error('[Y3-Helper] Failed to start TCP Server:', error);
+            if (!silent) {
+                vscode.window.showErrorMessage(l10n.t('启动 MCP TCP 服务器失败'));
+            }
+        }
+    }
+
+    private stopTCPServer() {
+        if (this.tcpServer) {
+            this.tcpServer.dispose();
+            this.tcpServer = undefined;
+            tools.log.info('[Y3-Helper] TCP Server stopped');
+        }
+    }
+
+    private registerCommandOfGenerateUIFramework() {
+        vscode.commands.registerCommand('y3-helper.generateUIFramework', async () => {
+            const generateUI = l10n.t('✅ 确认生成');
+            const choice = await vscode.window.showWarningMessage(
+                l10n.t('是否生成 UI 开发框架？'),
+                {
+                    modal: true,
+                    detail: l10n.t('将在 global_script/game/ 目录下生成 UI 框架文件（UIManager、BasePanel、BaseView、BaseTips 等）。\n\n⚠️ 注意：不会修改 global_main.lua，但如果 game/ 目录下已有同名框架文件，将被覆盖。\n\n生成后需要在 global_main.lua 中手动添加 include \'game.init\' 来启用。')
+                },
+                generateUI
+            );
+
+            if (choice !== generateUI) {
+                return;
+            }
+
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在生成 UI 框架...'),
+            }, async (progress) => {
+                const success = await uiFramework.initUIFramework(this.context, progress);
+                if (success) {
+                    vscode.window.showInformationMessage(l10n.t('✅ UI 框架已生成到 global_script/ 目录'));
+                } else {
+                    vscode.window.showErrorMessage(l10n.t('❌ UI 框架生成失败，请查看输出日志'));
+                }
+            });
+        });
+    }
+
+    private registerCommandOfMCP() {
+        vscode.commands.registerCommand('y3-helper.startMCPServer', async () => {
+            if (this.tcpServer) {
+                vscode.window.showInformationMessage(l10n.t('MCP Server 已经在运行'));
+                return;
+            }
+            await this.startTCPServer();
+            vscode.window.showInformationMessage(l10n.t('MCP Server 已启动'));
+        });
+
+        vscode.commands.registerCommand('y3-helper.stopMCPServer', () => {
+            if (!this.tcpServer) {
+                vscode.window.showInformationMessage(l10n.t('MCP Server 未运行'));
+                return;
+            }
+            this.stopTCPServer();
+            vscode.window.showInformationMessage(l10n.t('MCP Server 已停止'));
+        });
+
+        vscode.commands.registerCommand('y3-helper.configureMCP', async () => {
+            // 1. 检测平台
+            if (os.platform() !== 'win32') {
+                vscode.window.showErrorMessage(l10n.t('此功能仅支持 Windows 平台'));
+                return;
+            }
+
+            // 2. 显示环境选择对话框
+            const options = [
+                {
+                    label: l10n.t('Windows 环境'),
+                    description: l10n.t('在 Windows 中配置 Claude Code'),
+                },
+                {
+                    label: l10n.t('WSL 环境'),
+                    description: l10n.t('在 WSL 中配置 Claude Code'),
+                }
+            ];
+
+            const choice = await vscode.window.showQuickPick(options, {
+                placeHolder: l10n.t('选择要配置的环境'),
+                title: l10n.t('配置 Claude Code MCP')
+            });
+
+            if (!choice) {
+                return; // 用户取消
+            }
+
+            // 3. 根据选择执行对应的配置
+            if (choice === options[0]) {
+                await vscode.commands.executeCommand('y3-helper.configureMCPWindows');
+            } else {
+                await vscode.commands.executeCommand('y3-helper.configureMCPWSL');
+            }
+        });
+
+        vscode.commands.registerCommand('y3-helper.configureMCPWindows', async () => {
+            // 1. 检测平台
+            if (os.platform() !== 'win32') {
+                vscode.window.showErrorMessage(l10n.t('此功能仅支持 Windows 平台'));
+                return;
+            }
+
+            // 2. 检测 Claude CLI
+            const claudeCheckProgress = vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在检测 Claude CLI...'),
+                cancellable: false
+            }, async () => {
+                return await tools.wsl.isClaudeInstalledWindows();
+            });
+
+            const claudeInstalled = await claudeCheckProgress;
+            if (!claudeInstalled) {
+                const selection = await vscode.window.showErrorMessage(
+                    l10n.t('未检测到 Claude CLI，请先在 Windows 中安装 Claude Code'),
+                    l10n.t('查看安装指南')
+                );
+                if (selection === l10n.t('查看安装指南')) {
+                    vscode.env.openExternal(vscode.Uri.parse('https://claude.ai/code'));
+                }
+                return;
+            }
+
+            // 3. 执行配置
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在配置 MCP (Windows)...'),
+                cancellable: false
+            }, async () => {
+                const mcpServerPath = path.join(this.context.extensionPath, 'dist', 'mcp-server.js');
+                const result = await tools.wsl.configureMCPInWindows(mcpServerPath);
+
+                if (result.success) {
+                    vscode.window.showInformationMessage(
+                        l10n.t('MCP 配置成功！'),
+                        { detail: result.message, modal: true }
+                    );
+                } else {
+                    vscode.window.showErrorMessage(
+                        l10n.t('MCP 配置失败'),
+                        { detail: result.message, modal: true }
+                    );
+                }
+            });
+        });
+
+        vscode.commands.registerCommand('y3-helper.configureMCPWSL', async () => {
+            // 1. 检测平台
+            if (os.platform() !== 'win32') {
+                vscode.window.showErrorMessage(l10n.t('此功能仅支持 Windows 平台'));
+                return;
+            }
+
+            // 2. 检测 WSL
+            const wslCheckProgress = vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在检测 WSL...'),
+                cancellable: false
+            }, async () => {
+                return await tools.wsl.isWSLAvailable();
+            });
+
+            const wslAvailable = await wslCheckProgress;
+            if (!wslAvailable) {
+                const selection = await vscode.window.showErrorMessage(
+                    l10n.t('未检测到 WSL，请先安装 WSL'),
+                    l10n.t('查看安装指南')
+                );
+                if (selection === l10n.t('查看安装指南')) {
+                    vscode.env.openExternal(vscode.Uri.parse('https://learn.microsoft.com/zh-cn/windows/wsl/install'));
+                }
+                return;
+            }
+
+            // 3. 检测 Claude CLI
+            const claudeCheckProgress = vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在检测 Claude CLI...'),
+                cancellable: false
+            }, async () => {
+                return await tools.wsl.isClaudeInstalled();
+            });
+
+            const claudeInstalled = await claudeCheckProgress;
+            if (!claudeInstalled) {
+                const selection = await vscode.window.showErrorMessage(
+                    l10n.t('未检测到 Claude CLI，请先在 WSL 中安装 Claude Code'),
+                    l10n.t('查看安装指南')
+                );
+                if (selection === l10n.t('查看安装指南')) {
+                    vscode.env.openExternal(vscode.Uri.parse('https://claude.ai/code'));
+                }
+                return;
+            }
+
+            // 4. 执行配置
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: l10n.t('正在配置 MCP (WSL)...'),
+                cancellable: false
+            }, async () => {
+                const mcpServerPath = path.join(this.context.extensionPath, 'dist', 'mcp-server.js');
+                const result = await tools.wsl.configureMCPInWSL(mcpServerPath);
+
+                if (result.success) {
+                    vscode.window.showInformationMessage(
+                        l10n.t('MCP 配置成功！'),
+                        { detail: result.message, modal: true }
+                    );
+                } else {
+                    vscode.window.showErrorMessage(
+                        l10n.t('MCP 配置失败'),
+                        { detail: result.message, modal: true }
+                    );
+                }
+            });
+        });
+    }
+
     private checkNewProject() {
         let newProjectPath = this.context.globalState.get("NewProjectPath");
         if (!newProjectPath) {
@@ -292,15 +549,21 @@ class Helper {
         this.registerCommandOfLaunchGame();
         this.registerCommandOfAttach();
         this.registerCommandOfLaunchEditor();
-        
+        this.registerCommandOfGenerateUIFramework();
+        this.registerCommandOfMCP();
+
         this.reloadEnvWhenConfigChange();
 
         this.registerCommandOfNetworkServer();
         this.registerCommonCommands();
 
-        setTimeout(() => {
+        setTimeout(async () => {
             this.checkNewProject();
             mainMenu.init();
+            // 默认自动启动 MCP Server（静默模式，端口冲突时不弹错误）
+            if (!this.tcpServer) {
+                await this.startTCPServer(true);
+            }
             metaBuilder.init();
             debug.init(this.context);
             console.init();
@@ -335,6 +598,11 @@ export async function activate(context: vscode.ExtensionContext) {
     let helper = new Helper(context);
 
     helper.start();
+
+    // 初始化 CodeMaker 模块
+    initCodeMaker(context);
 }
 
-export function deactivate() {}
+export function deactivate() {
+    stopCodeMaker();
+}
