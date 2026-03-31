@@ -354,7 +354,7 @@ export class CodeMakerWebviewProvider implements vscode.WebviewViewProvider {
                     result = await this._toolEditFile(tool_params);
                     break;
                 case 'run_terminal_cmd':
-                    result = await this._toolRunTerminalCmd(tool_params);
+                    result = await this._toolRunTerminalCmd(tool_params, tool_id);
                     break;
                 case 'make_plan':
                 case 'write_todo':
@@ -868,10 +868,10 @@ Provide the complete updated code.`;
      * 2. 使用 spawn 执行命令，实时发送 TERMINAL_TRANSFER_LOG (status: RUNNING) 推送输出
      * 3. 命令结束后返回 TOOL_CALL_RESULT (terminalStatus: Success/Failed)
      */
-    private async _toolRunTerminalCmd(params: any): Promise<any> {
+    private async _toolRunTerminalCmd(params: any, toolId: string): Promise<any> {
         const command = params?.command;
         const messageId = params?.messageId || '';
-        const terminalId = params?.tool_id || '';
+        const terminalId = toolId || '';
 
         if (!command) {
             return { content: 'Error: command is required.', isError: true, path: '' };
