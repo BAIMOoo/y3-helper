@@ -986,11 +986,9 @@ Provide the complete updated code.`;
 
                     console.log(`[CodeMaker] run_terminal_cmd: exitCode=${exitCode}, hasError=${hasError}, output.len=${outputText.length}`);
 
-                    // 对齐源码版：只有 spawn error 事件才判定为 FAILED
-                    // exit code 非 0 不影响 terminalStatus（脚本参数错误等情况仍显示"已执行"）
-                    if (!hasError) {
+                    // 对齐源码版：如果状态不是执行失败，默认是执行成功
+                    if (result.extra.terminalStatus !== 'Failed') {
                         result.extra.terminalStatus = 'Success';
-                        result.extra.status = '';
                     }
 
                     if (exitCode !== 0 && !outputText.length) {
