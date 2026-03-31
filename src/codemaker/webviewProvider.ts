@@ -863,69 +863,167 @@ Provide the complete updated code.`;
 
     /**
      * run_terminal_cmd 工具：在终端中执行命令
-     * 源码版有完整的 TerminalManager + Shell Integration，我们简化为直接执行
+     * 对齐源码版 TerminalManager 的完整流程：
+     * 1. 发送 TERMINAL_TRANSFER_LOG (status: START) 通知前端命令开始
+     * 2. 使用 spawn 执行命令，实时发送 TERMINAL_TRANSFER_LOG (status: RUNNING) 推送输出
+     * 3. 命令结束后返回 TOOL_CALL_RESULT (terminalStatus: Success/Failed)
      */
     private async _toolRunTerminalCmd(params: any): Promise<any> {
         const command = params?.command;
+        const messageId = params?.messageId || '';
+        const terminalId = params?.tool_id || '';
+
         if (!command) {
             return { content: 'Error: command is required.', isError: true, path: '' };
         }
+
+        const result = {
+            content: 'The user is not allowed to execute commands',
+            path: command,
+            isError: false,
+            extra: {
+                messageId: messageId,
+                terminalId: terminalId,
+                terminalStatus: '' as string,  // START/RUNNING/SUCCESS/FAILED
+                hasShellIntegration: false,
+                status: '' as string,
+            },
+        };
+
+        // 发送 TERMINAL_TRANSFER_LOG 消息给前端（对齐源码版 sendLog）
+        const sendTerminalLog = (log: string, status: string, isHot: boolean = false) => {
+            this.sendMessage({
+                type: 'TERMINAL_TRANSFER_LOG',
+                data: {
+                    messageId,
+                    terminalId,
+                    log,
+                    extra: {
+                        terminalStatus: status,
+                        hasShellIntegration: isHot,
+                        status: isHot ? 'Running' : '',
+                    },
+                },
+            });
+        };
+
+        if (!params?.is_approve) {
+            // 用户拒绝执行
+            result.extra.terminalStatus = 'Canceled';
+            return result;
+        }
+
         try {
             const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-            const cp = require('child_process');
-            
+            const { spawn } = require('child_process') as typeof import('child_process');
+
+            // 1. 发送初始 START 状态
+            sendTerminalLog('', '', false);
+
             return new Promise<any>((resolve) => {
-                const options: any = { cwd: workspace, encoding: 'utf-8', timeout: 30000, maxBuffer: 1024 * 1024 * 5 };
-                cp.exec(command, options, (error: any, stdout: string, stderr: string) => {
-                    const output = stdout || '';
-                    const errOutput = stderr || '';
+                const shell = process.env.COMSPEC || 'cmd.exe';
+                const childProcess = spawn(command, [], {
+                    cwd: workspace || process.cwd(),
+                    shell: true,
+                    stdio: 'pipe',
+                    env: {
+                        ...process.env,
+                        PYTHONIOENCODING: 'utf-8',
+                        PYTHONUTF8: '1',
+                        NODE_OPTIONS: process.env.NODE_OPTIONS
+                            ? `${process.env.NODE_OPTIONS} --no-warnings`
+                            : '--no-warnings',
+                        LANG: 'C.UTF-8',
+                        LC_ALL: 'C.UTF-8',
+                        CHCP: '65001',
+                    },
+                });
 
-                    // Windows cmd 命令判断：
-                    // - error 为 null → 成功
-                    // - error.code 存在且非 0 → 真正的失败
-                    // - error.killed / error.signal → 被杀死/超时
-                    // - 其他情况（error 存在但 code 为 undefined 或 null）→ 视为成功
-                    let isRealError = false;
-                    let exitCode = 0;
-                    if (error) {
-                        exitCode = typeof error.code === 'number' ? error.code : 0;
-                        isRealError = exitCode !== 0 || !!error.killed || !!error.signal;
+                let lines: string[] = [];
+                let exitCode = 0;
+                let hasError = false;
+
+                // 解码 Buffer 为 UTF-8 字符串
+                const decodeBuffer = (data: Buffer): string => {
+                    try {
+                        return data.toString('utf-8');
+                    } catch {
+                        return data.toString();
                     }
+                };
 
-                    console.log(`[CodeMaker] run_terminal_cmd: error=${!!error}, exitCode=${exitCode}, killed=${error?.killed}, signal=${error?.signal}, stdout.len=${output.length}, stderr.len=${errOutput.length}`);
+                // 2. stdout 实时推送
+                childProcess.stdout?.on('data', (data: Buffer) => {
+                    const output = decodeBuffer(data);
+                    lines.push(output);
+                    sendTerminalLog(output, 'Running', true);
+                });
 
-                    if (isRealError) {
-                        resolve({
-                            content: `Command failed (exit code ${exitCode}).\nOutput: ${output}\nError: ${errOutput || error.message}\n`,
-                            path: command,
-                            isError: true,
-                            extra: {
-                                messageId: params?.messageId,
-                                terminalId: params?.tool_id,
-                                terminalStatus: 'Failed',
-                                hasShellIntegration: false,
-                                status: 'Failed',
-                            },
-                        });
-                    } else {
-                        const resultText = output || 'Command executed successfully.\n';
-                        resolve({
-                            content: `Command executed successfully.\nOutput: ${resultText}${errOutput ? '\nStderr: ' + errOutput : ''}\n`,
-                            path: command,
-                            isError: false,
-                            extra: {
-                                messageId: params?.messageId,
-                                terminalId: params?.tool_id,
-                                terminalStatus: 'Success',
-                                hasShellIntegration: false,
-                                status: '',
-                            },
-                        });
+                // 2. stderr 实时推送（stderr 不一定代表错误，很多工具用 stderr 输出进度信息）
+                childProcess.stderr?.on('data', (data: Buffer) => {
+                    const output = decodeBuffer(data);
+                    lines.push(output);
+                    sendTerminalLog(output, 'Running', true);
+                });
+
+                childProcess.on('error', (error: Error) => {
+                    hasError = true;
+                    console.error(`[CodeMaker] run_terminal_cmd spawn error:`, error);
+                });
+
+                childProcess.on('exit', (code: number | null) => {
+                    exitCode = code || 0;
+                    if (exitCode !== 0) {
+                        sendTerminalLog(`exit code is ${exitCode}\n`, 'Success', false);
                     }
                 });
+
+                childProcess.on('close', () => {
+                    // 3. 命令执行完毕，发送完成状态的 log
+                    sendTerminalLog('', 'Success', false);
+
+                    const outputText = lines.join('').trim();
+                    const isRealError = hasError || (exitCode !== 0);
+
+                    console.log(`[CodeMaker] run_terminal_cmd: exitCode=${exitCode}, hasError=${hasError}, output.len=${outputText.length}`);
+
+                    if (isRealError) {
+                        result.content = `Command failed (exit code ${exitCode}).\nOutput: ${outputText}\n`;
+                        result.isError = true;
+                        result.extra.terminalStatus = 'Failed';
+                        result.extra.status = 'Failed';
+                    } else {
+                        result.content = outputText
+                            ? `Command executed successfully.\nOutput: ${outputText}\n`
+                            : `Command executed successfully.\n`;
+                        result.isError = false;
+                        result.extra.terminalStatus = 'Success';
+                        result.extra.status = '';
+                    }
+
+                    resolve(result);
+                });
+
+                // 超时保护：防止命令无限挂起
+                const timeout = 120000; // 2分钟
+                setTimeout(() => {
+                    if (!childProcess.killed) {
+                        childProcess.kill();
+                        const outputText = lines.join('').trim();
+                        result.content = `Command timed out after ${timeout / 1000}s.\nOutput so far: ${outputText}\n`;
+                        result.isError = true;
+                        result.extra.terminalStatus = 'Failed';
+                        result.extra.status = 'Failed';
+                        resolve(result);
+                    }
+                }, timeout);
             });
         } catch (err: any) {
-            return { content: `Error running command: ${err.message}`, isError: true, path: '' };
+            result.content = `Error running command: ${err.message}`;
+            result.isError = true;
+            result.extra.terminalStatus = 'Failed';
+            result.extra.status = 'Failed';
+            return result;
         }
     }
 
