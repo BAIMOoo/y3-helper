@@ -983,23 +983,22 @@ Provide the complete updated code.`;
                     sendTerminalLog('', 'Success', false);
 
                     const outputText = lines.join('').trim();
-                    const isRealError = hasError || (exitCode !== 0);
 
                     console.log(`[CodeMaker] run_terminal_cmd: exitCode=${exitCode}, hasError=${hasError}, output.len=${outputText.length}`);
 
-                    if (isRealError) {
-                        result.content = `Command failed (exit code ${exitCode}).\nOutput: ${outputText}\n`;
-                        result.isError = true;
-                        result.extra.terminalStatus = 'Failed';
-                        result.extra.status = 'Failed';
-                    } else {
-                        result.content = outputText
-                            ? `Command executed successfully.\nOutput: ${outputText}\n`
-                            : `Command executed successfully.\n`;
-                        result.isError = false;
+                    // 对齐源码版：只有 spawn error 事件才判定为 FAILED
+                    // exit code 非 0 不影响 terminalStatus（脚本参数错误等情况仍显示"已执行"）
+                    if (!hasError) {
                         result.extra.terminalStatus = 'Success';
                         result.extra.status = '';
                     }
+
+                    if (exitCode !== 0 && !outputText.length) {
+                        result.content = `Command executed successfully. \n The code of Executed command is ${exitCode}.This output is nothing \n`;
+                    } else {
+                        result.content = `Command executed successfully.\nOutput: ${outputText}\n`;
+                    }
+                    result.isError = hasError;
 
                     resolve(result);
                 });
