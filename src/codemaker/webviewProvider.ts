@@ -861,6 +861,15 @@ Provide the complete updated code.`;
         }
     }
 
+    // 对齐源码版 ETerminalStatus 枚举
+    private static readonly ETerminalStatus = {
+        START: '',
+        CANCELED: 'Canceled',
+        RUNNING: 'Running',
+        FAILED: 'Failed',
+        SUCCESS: 'Success',
+    } as const;
+
     /**
      * run_terminal_cmd 工具：在终端中执行命令
      * 对齐源码版 TerminalManager 的完整流程：
@@ -877,6 +886,7 @@ Provide the complete updated code.`;
             return { content: 'Error: command is required.', isError: true, path: '' };
         }
 
+        const ETS = CodeMakerWebviewProvider.ETerminalStatus;
         const result = {
             content: 'The user is not allowed to execute commands',
             path: command,
@@ -884,9 +894,9 @@ Provide the complete updated code.`;
             extra: {
                 messageId: messageId,
                 terminalId: terminalId,
-                terminalStatus: '' as string,  // START/RUNNING/SUCCESS/FAILED
+                terminalStatus: ETS.START as string,
                 hasShellIntegration: false,
-                status: '' as string,
+                status: ETS.START as string,
             },
         };
 
@@ -901,7 +911,7 @@ Provide the complete updated code.`;
                     extra: {
                         terminalStatus: status,
                         hasShellIntegration: isHot,
-                        status: isHot ? 'Running' : '',
+                        status: isHot ? ETS.RUNNING : ETS.START,
                     },
                 },
             });
@@ -909,7 +919,7 @@ Provide the complete updated code.`;
 
         if (!params?.is_approve) {
             // 用户拒绝执行
-            result.extra.terminalStatus = 'Canceled';
+            result.extra.terminalStatus = ETS.CANCELED;
             return result;
         }
 
@@ -918,7 +928,7 @@ Provide the complete updated code.`;
             const { spawn } = require('child_process') as typeof import('child_process');
 
             // 1. 发送初始 START 状态
-            sendTerminalLog('', '', false);
+            sendTerminalLog('', ETS.START, false);
 
             return new Promise<any>((resolve) => {
                 const shell = process.env.COMSPEC || 'cmd.exe';
@@ -956,14 +966,14 @@ Provide the complete updated code.`;
                 childProcess.stdout?.on('data', (data: Buffer) => {
                     const output = decodeBuffer(data);
                     lines.push(output);
-                    sendTerminalLog(output, 'Running', true);
+                    sendTerminalLog(output, ETS.RUNNING, true);
                 });
 
                 // 2. stderr 实时推送（stderr 不一定代表错误，很多工具用 stderr 输出进度信息）
                 childProcess.stderr?.on('data', (data: Buffer) => {
                     const output = decodeBuffer(data);
                     lines.push(output);
-                    sendTerminalLog(output, 'Running', true);
+                    sendTerminalLog(output, ETS.RUNNING, true);
                 });
 
                 childProcess.on('error', (error: Error) => {
@@ -974,21 +984,21 @@ Provide the complete updated code.`;
                 childProcess.on('exit', (code: number | null) => {
                     exitCode = code || 0;
                     if (exitCode !== 0) {
-                        sendTerminalLog(`exit code is ${exitCode}\n`, 'Success', false);
+                        sendTerminalLog(`exit code is ${exitCode}\n`, ETS.SUCCESS, false);
                     }
                 });
 
                 childProcess.on('close', () => {
                     // 3. 命令执行完毕，发送完成状态的 log
-                    sendTerminalLog('', 'Success', false);
+                    sendTerminalLog('', ETS.SUCCESS, false);
 
                     const outputText = lines.join('').trim();
 
                     console.log(`[CodeMaker] run_terminal_cmd: exitCode=${exitCode}, hasError=${hasError}, output.len=${outputText.length}`);
 
                     // 对齐源码版：如果状态不是执行失败，默认是执行成功
-                    if (result.extra.terminalStatus !== 'Failed') {
-                        result.extra.terminalStatus = 'Success';
+                    if (result.extra.terminalStatus !== ETS.FAILED) {
+                        result.extra.terminalStatus = ETS.SUCCESS;
                     }
 
                     if (exitCode !== 0 && !outputText.length) {
@@ -1009,8 +1019,8 @@ Provide the complete updated code.`;
                         const outputText = lines.join('').trim();
                         result.content = `Command timed out after ${timeout / 1000}s.\nOutput so far: ${outputText}\n`;
                         result.isError = true;
-                        result.extra.terminalStatus = 'Failed';
-                        result.extra.status = 'Failed';
+                        result.extra.terminalStatus = ETS.FAILED;
+                        result.extra.status = ETS.FAILED;
                         resolve(result);
                     }
                 }, timeout);
@@ -1018,8 +1028,8 @@ Provide the complete updated code.`;
         } catch (err: any) {
             result.content = `Error running command: ${err.message}`;
             result.isError = true;
-            result.extra.terminalStatus = 'Failed';
-            result.extra.status = 'Failed';
+            result.extra.terminalStatus = ETS.FAILED;
+            result.extra.status = ETS.FAILED;
             return result;
         }
     }
