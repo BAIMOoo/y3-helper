@@ -13,3 +13,4 @@ ticket_id,archive_time,ai_lines,total_lines,author,svn_revisions,commit_count,ch
 98275,2026/3/24,500,500,王浩辰,,1,fix-accept-edit-and-responses-api,ACCEPT_EDIT对齐源码版EditApplyProvider(Document API写入+重复应用检测+空白冲突比较)+Responses API支持function calling(tools转换+tool_call事件+call_id格式)
 98275,2026/3/24,200,200,王浩辰,,1,feat-codemaker-skills-toolbar,移植Skills工具栏功能:GET_SKILLS/CREATE_SKILL_TEMPLATE/INSTALL_BUILTIN_SKILL消息处理+use_skill工具+支持子目录SKILL.md格式+mcp_settings.json默认值+MCP Server默认自动启动
 98275,2026/3/25,500,500,王浩辰,,1,fix-at-panel-current-file,修复@面板无法选中当前文件:移植workspaceTracker(全量文件索引)+openFilesHandler(最近文件追踪)+searchWorkspacePath对齐源码版
+98706,2026/3/31,1694,1694,刘冰,7f67cd0;7173ee6;d1473fe;7bb66b2,4,migrate-ui-framework-to-lualib-98706,UI框架从y3-helper模板迁移到y3-lualib:BasePanel/BaseView/BaseTips/EventBus/UIManager+公开API(y3.ui_manager)+share模块+类级别on_event
