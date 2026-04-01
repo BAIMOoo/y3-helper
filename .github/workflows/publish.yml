@@ -24,12 +24,11 @@ jobs:
         with:
           node-version: '>=24'
 
-      - name: Compile Client
+      - name: Build Extension
         shell: bash
         run: |
           npm install
-          npm install -g typescript
-          tsc -p ./
+          npm run vscode:prepublish
 
       - name: Pack vsix
         shell: bash
